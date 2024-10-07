@@ -18,9 +18,13 @@ console.log('Twitter client initialized:', twitterClient);
 
 // Function to replace specific links and text
 const replaceLinksAndText = (text) => {
-  return text
-    .replace(/https:\/\/t\.me\/\/nikhilfkm\/|https:\/\/t\.me\/trtpremiumdeals/g, 'https://t.me/deals24com')
-    .replace(/TRT Premium Deals/g, 'Deals24 https://t.me/deals24com');
+	console.log('Original text:', text);
+	return text
+		.replace(
+			/https:\/\/t\.me\/\/nikhilfkm\/|https:\/\/t\.me\/trtpremiumdeals/g,
+			'https://t.me/deals24com',
+		)
+		.replace(/TRT Premium Deals/g, 'Deals24');
 };
 
 // Function to split long text into chunks
