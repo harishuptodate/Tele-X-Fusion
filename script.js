@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { Telegraf } = require('telegraf');
 const { TwitterApi } = require('twitter-api-v2');
+let lastMessageTimestamp = 0; // This will store the last processed message's timestamp
 
 // Telegram bot setup
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
@@ -49,9 +50,13 @@ const splitText = (text, maxLength) => {
 bot.on('channel_post', async (ctx) => {
 	// This will handle messages specifically from a channel
 	const message = ctx.channelPost;
+	const messageTimestamp = message.date * 1000; // Convert to milliseconds
 	console.log('Received a message from Telegram channel:', message);
 
-	if (message) {
+	// Only process new messages
+	if (messageTimestamp > lastMessageTimestamp) {
+		lastMessageTimestamp = messageTimestamp; // Update the timestamp
+
 		const caption = replaceLinksAndText(message.caption || message.text); // Use either caption or text
 		console.log('Filtered caption:', caption);
 
@@ -81,7 +86,7 @@ bot.on('channel_post', async (ctx) => {
 			console.error('Error posting tweet:', error);
 		}
 	} else {
-		console.log('No message found in the context.');
+		console.log('Skipping older message.');
 	}
 });
 
