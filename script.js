@@ -49,6 +49,7 @@ const splitText = (text, maxLength) => {
 bot.on('channel_post', async (ctx) => {
 	// This will handle messages specifically from a channel
 	const message = ctx.channelPost;
+	const messageTimestamp = message.date * 1000; // Convert to milliseconds
 	console.log('Received a message from Telegram channel:', message);
 
 	// Only process new messages
