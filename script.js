@@ -13,9 +13,6 @@ const twitterClient = new TwitterApi({
 	accessSecret: process.env.TWITTER_ACCESS_TOKEN_SECRET,
 });
 
-// Log the Twitter client to ensure it's initialized
-console.log('Twitter client initialized:', twitterClient);
-
 // Function to replace specific links and text
 const replaceLinksAndText = (text) => {
 	return text
@@ -23,7 +20,7 @@ const replaceLinksAndText = (text) => {
 			/https:\/\/t\.me\/\/nikhilfkm\/|https:\/\/t\.me\/trtpremiumdeals/g,
 			'https://t.me/deals24com',
 		)
-		.replace(/TRT Premium Deals/g, 'Deals24 https://t.me/deals24com');
+		.replace(/TRT Premium Deals/g, 'Deals24');
 };
 
 // Function to split long text into chunks
@@ -47,33 +44,27 @@ const splitText = (text, maxLength) => {
 // Listen to any message in the Telegram channel
 bot.on('channel_post', async (ctx) => {
 	const message = ctx.channelPost;
-	console.log('Received a message from Telegram channel:', message);
 
 	if (message) {
 		const caption = replaceLinksAndText(message.caption || message.text);
-		console.log('Filtered caption:', caption);
+		const finalCaption = caption + '\n\n#Deals24';
 
 		try {
-			const captionChunks = splitText(caption, 280);
-			console.log('Caption chunks:', captionChunks);
+			const captionChunks = splitText(finalCaption, 280);
 
 			let firstTweet = await twitterClient.v2.tweet(captionChunks[0]);
-			console.log('First tweet posted:', firstTweet);
 
 			for (let i = 1; i < captionChunks.length; i++) {
 				firstTweet = await twitterClient.v2.reply(
 					captionChunks[i],
 					firstTweet.data.id,
 				);
-				console.log(`Reply ${i} posted:`, firstTweet);
 			}
 
 			console.log('Tweet posted successfully!');
 		} catch (error) {
 			console.error('Error posting tweet:', error);
 		}
-	} else {
-		console.log('No message found in the context.');
 	}
 });
 
