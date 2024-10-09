@@ -1,7 +1,10 @@
 require('dotenv').config();
+const fs = require('fs');
 const { Telegraf } = require('telegraf');
 const { TwitterApi } = require('twitter-api-v2');
-let lastMessageTimestamp = 0; // This will store the last processed message's timestamp
+
+// File to store the last few processed message IDs
+const path = './processedMessages.json';
 
 // Telegram bot setup
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
@@ -14,8 +17,19 @@ const twitterClient = new TwitterApi({
 	accessSecret: process.env.TWITTER_ACCESS_TOKEN_SECRET,
 });
 
-// Log the Twitter client to ensure it's initialized
-console.log('Twitter client initialized:', twitterClient);
+// Function to get the last processed message IDs
+const getLastProcessedMessageIds = () => {
+	if (!fs.existsSync(path)) {
+		return [];
+	}
+	const data = fs.readFileSync(path, 'utf-8');
+	return JSON.parse(data) || [];
+};
+
+// Function to update the last processed message IDs in the file
+const setLastProcessedMessageIds = (messageIds) => {
+	fs.writeFileSync(path, JSON.stringify(messageIds), 'utf-8');
+};
 
 // Function to replace specific links and text
 const replaceLinksAndText = (text) => {
@@ -45,16 +59,29 @@ const splitText = (text, maxLength) => {
 	return chunks;
 };
 
+// A simple delay function to simulate awaiting
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 // Listen to any message in the Telegram channel
 bot.on('channel_post', async (ctx) => {
-	// This will handle messages specifically from a channel
 	const message = ctx.channelPost;
+	const messageId = message.message_id.toString(); // Use message_id as a unique identifier
 	const messageTimestamp = message.date * 1000; // Convert to milliseconds
-	console.log('Received a message from Telegram channel:', message);
+	const currentTimestamp = Date.now(); // Get current timestamp
 
-	// Only process new messages
-	if (messageTimestamp > lastMessageTimestamp) {
-		lastMessageTimestamp = messageTimestamp; // Update the timestamp
+	const processedMessageIds = getLastProcessedMessageIds();
+	console.log('Last processed message IDs:', processedMessageIds);
+
+	// Check if the message is new and recent
+	if (!processedMessageIds.includes(messageId)) {
+		processedMessageIds.push(messageId); // Add the new message ID
+
+		// Keep only the last 10 processed message IDs
+		if (processedMessageIds.length > 10) {
+			processedMessageIds.shift(); // Remove the oldest message ID
+		}
+
+		setLastProcessedMessageIds(processedMessageIds); // Update the file
 
 		const caption = replaceLinksAndText(message.caption || message.text); // Use either caption or text
 		console.log('Filtered caption:', caption);
@@ -84,8 +111,11 @@ bot.on('channel_post', async (ctx) => {
 		} catch (error) {
 			console.error('Error posting tweet:', error);
 		}
+
+		// Delay to reduce race conditions
+		await delay(100); // Add a small delay after processing the message
 	} else {
-		console.log('Skipping older message.');
+		console.log('Skipping already processed message.');
 	}
 });
 

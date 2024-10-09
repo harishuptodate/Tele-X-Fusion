@@ -38,6 +38,10 @@ bower_components
 # Compiled binary addons (https://nodejs.org/api/addons.html)
 build/Release
 
+# Old message filter file for posting only new files..... Stores Message IDs
+processedMessages.json
+
+
 # Dependency directories
 node_modules/
 jspm_packages/
