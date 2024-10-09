@@ -2,9 +2,22 @@ require('dotenv').config();
 const fs = require('fs');
 const { Telegraf } = require('telegraf');
 const { TwitterApi } = require('twitter-api-v2');
+const express = require('express');
 
 // File to store the last few processed message IDs
 const path = './processedMessages.json';
+
+// Set up Express server to keep service alive
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+	res.send('Bot is running!');
+});
+
+app.listen(PORT, () => {
+	console.log(`Server running on port ${PORT}`);
+});
 
 // Telegram bot setup
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
