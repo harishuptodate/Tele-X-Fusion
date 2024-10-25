@@ -81,6 +81,13 @@ bot.on('channel_post', async (ctx) => {
 	const messageId = message.message_id.toString(); // Use message_id as a unique identifier
 	const messageTimestamp = message.date * 1000; // Convert to milliseconds
 	const currentTimestamp = Date.now(); // Get current timestamp
+	const maxAllowedAge = 60 * 1000; // Maximum message age allowed (60 seconds)
+
+	// Skip processing if the message is older than the max allowed age
+	if (currentTimestamp - messageTimestamp > maxAllowedAge) {
+		console.log('Skipping old message due to age.');
+		return;
+	}
 
 	const processedMessageIds = getLastProcessedMessageIds();
 	console.log('Last processed message IDs:', processedMessageIds);
