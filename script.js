@@ -34,6 +34,9 @@ const twitterClient = new TwitterApi({
 // Hashes to store unique content
 let contentHashes = [];
 
+// Environment flag for sale mode
+const IS_SALE_MODE = process.env.IS_SALE_MODE === 'true';
+
 // Function to get the last processed message IDs
 const getLastProcessedMessageIds = () => {
 	if (!fs.existsSync(path)) {
@@ -92,6 +95,28 @@ const isLowContext = (text) => {
 	return keywordMatch && meaningfulText.length < 60; // Keywords but no big context
 };
 
+// Function to check if the product is profitable
+const isProfitableProduct = (text) => {
+	const profitableKeywords = [
+		'tv',
+		'tvs',
+		'4KTVS',
+		'4k',
+		'laptop',
+		'washing machine',
+		'FRONT LOAD',
+		'TOP LOAD',
+		'air conditioner',
+		'ac',
+		'acs',
+		'Ton',
+		'refrigerator',
+	];
+	return profitableKeywords.some((keyword) =>
+		text.toLowerCase().includes(keyword),
+	);
+};
+
 // A simple delay function to simulate awaiting
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -111,6 +136,12 @@ bot.on('channel_post', async (ctx) => {
 	// Skip low-context messages
 	if (isLowContext(textContent)) {
 		console.log('Skipping low-context message:', textContent);
+		return;
+	}
+
+	// Skip non-profitable products during sale mode
+	if (IS_SALE_MODE && !isProfitableProduct(textContent)) {
+		console.log('Skipping non-profitable product in sale mode:', textContent);
 		return;
 	}
 
