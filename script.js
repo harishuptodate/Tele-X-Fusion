@@ -100,11 +100,11 @@ const isProfitableProduct = (text) => {
 	const profitableKeywords = [
 		'tv',
 		'tvs',
-		'4KTVS',
+		'4ktvs',
 		'4k',
 		'laptop',
 		'washing machine',
-		'AI',
+		'ai',
 		'kg',
 		'12 kg',
 		'9 kg',
@@ -113,22 +113,34 @@ const isProfitableProduct = (text) => {
 		'6.5 kg',
 		'10 kg',
 		'8.5 kg',
-		'FRONT LOAD',
-		'TOP LOAD',
+		'front load',
+		'top load',
 		'air conditioner',
 		'ac',
 		'acs',
-		'Ton',
+		'ton',
 		'refrigerator',
-		'653 L',
-		'Single door',
+		'653 l',
+		'single door',
 		'double door',
 		'triple door',
 		'side by side',
+		'intel',
+		'core',
+		'ryzen',
+		'bravia',
 	];
-	return profitableKeywords.some((keyword) =>
-		text.toLowerCase().includes(keyword),
-	);
+
+	console.log('Text being checked:', text); // Log the text being checked
+
+	for (let keyword of profitableKeywords) {
+		const regex = new RegExp(`\\b${keyword}\\b`, 'i'); // Ensure proper boundary matching
+		if (regex.test(text)) {
+			console.log(`Match found for keyword: ${keyword}`); // Log matching keywords
+			return true;
+		}
+	}
+	return false;
 };
 
 // A simple delay function to simulate awaiting
@@ -153,10 +165,12 @@ bot.on('channel_post', async (ctx) => {
 		return;
 	}
 
-	// Skip non-profitable products during sale mode
-	if (IS_SALE_MODE && !isProfitableProduct(textContent)) {
-		console.log('Skipping non-profitable product in sale mode:', textContent);
-		return;
+	// Check if it's in sale mode and if the product is profitable
+	if (IS_SALE_MODE) {
+		if (!isProfitableProduct(textContent)) {
+			console.log('Skipping non-profitable product in sale mode:', textContent);
+			return;
+		}
 	}
 
 	// Add message ID and content hash to processed list
