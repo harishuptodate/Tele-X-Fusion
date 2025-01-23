@@ -51,6 +51,11 @@ const setLastProcessedMessageIds = (messageIds) => {
 	fs.writeFileSync(path, JSON.stringify(messageIds), 'utf-8');
 };
 
+// Function to remove links from the text
+const removeLinks = (text) => {
+	return text.replace(/https?:\/\/\S+/g, '');
+};
+
 // Function to replace specific links and text
 const replaceLinksAndText = (text) => {
 	return text
@@ -59,6 +64,14 @@ const replaceLinksAndText = (text) => {
 			'https://t.me/deals24com',
 		)
 		.replace(/TRT Premium Deals/g, 'Deals24');
+};
+
+// Function to normalize the message (removing links and extra formatting)
+const normalizeMessage = (text) => {
+	return removeLinks(text)
+		.trim() // Remove leading/trailing spaces
+		.replace(/\s+/g, ' ') // Replace multiple spaces/newlines with a single space
+		.toLowerCase(); // Case-insensitive comparison
 };
 
 // Function to split long text into chunks
@@ -81,7 +94,8 @@ const splitText = (text, maxLength) => {
 
 // Function to calculate hash of a message's content
 const calculateHash = (text) => {
-	return crypto.createHash('sha256').update(text).digest('hex');
+	const normalizedText = normalizeMessage(text);
+	return crypto.createHash('sha256').update(normalizedText).digest('hex');
 };
 
 // Function to filter low-context messages
