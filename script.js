@@ -5,7 +5,7 @@ const { Telegraf } = require('telegraf');
 const { TwitterApi } = require('twitter-api-v2');
 const express = require('express');
 
-// File to store the last few processed message IDs
+// File to store the last few processed message IDs restart logic
 const path = './processedMessages.json';
 
 // Set up Express server to keep service alive
@@ -44,6 +44,13 @@ const getLastProcessedMessageIds = () => {
 	}
 	const data = fs.readFileSync(path, 'utf-8');
 	return JSON.parse(data) || [];
+};
+
+// Function to check if the message is recent (within 5 minutes)
+const isRecentMessage = (messageDate) => {
+	const messageTimestamp = messageDate * 1000; // Convert Telegram timestamp (seconds) to milliseconds
+	const currentTimestamp = Date.now();
+	return currentTimestamp - messageTimestamp <= 5 * 60 * 1000; // 5 minutes threshold
 };
 
 // Function to update the last processed message IDs in the file
@@ -166,6 +173,11 @@ bot.on('channel_post', async (ctx) => {
 	const messageId = message.message_id.toString();
 	const textContent = message.caption || message.text;
 
+	// Check if the message is recent
+	if (!isRecentMessage(message.date)) {
+		console.log('Skipping 5min old message :', textContent);
+		return;
+	}
 	// Check if the message is already processed by its hash
 	const messageHash = calculateHash(textContent);
 	if (contentHashes.includes(messageHash)) {
