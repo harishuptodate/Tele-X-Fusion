@@ -5,7 +5,7 @@ const { Telegraf } = require('telegraf');
 const { TwitterApi } = require('twitter-api-v2');
 const express = require('express');
 
-// File to store the last few processed message IDs
+// File to store the last few processed message IDs restart logic
 const path = './processedMessages.json';
 
 // Set up Express server to keep service alive
@@ -34,6 +34,9 @@ const twitterClient = new TwitterApi({
 // Hashes to store unique content
 let contentHashes = [];
 
+// Environment flag for sale mode
+const IS_SALE_MODE = process.env.IS_SALE_MODE === 'true';
+
 // Function to get the last processed message IDs
 const getLastProcessedMessageIds = () => {
 	if (!fs.existsSync(path)) {
@@ -43,9 +46,21 @@ const getLastProcessedMessageIds = () => {
 	return JSON.parse(data) || [];
 };
 
+// Function to check if the message is recent (within 5 minutes)
+const isRecentMessage = (messageDate) => {
+	const messageTimestamp = messageDate * 1000; // Convert Telegram timestamp (seconds) to milliseconds
+	const currentTimestamp = Date.now();
+	return currentTimestamp - messageTimestamp <= 5 * 60 * 1000; // 5 minutes threshold
+};
+
 // Function to update the last processed message IDs in the file
 const setLastProcessedMessageIds = (messageIds) => {
 	fs.writeFileSync(path, JSON.stringify(messageIds), 'utf-8');
+};
+
+// Function to remove links from the text
+const removeLinks = (text) => {
+	return text.replace(/https?:\/\/\S+/g, '');
 };
 
 // Function to replace specific links and text
@@ -56,6 +71,14 @@ const replaceLinksAndText = (text) => {
 			'https://t.me/deals24com',
 		)
 		.replace(/TRT Premium Deals/g, 'Deals24');
+};
+
+// Function to normalize the message (removing links and extra formatting)
+const normalizeMessage = (text) => {
+	return removeLinks(text)
+		.trim() // Remove leading/trailing spaces
+		.replace(/\s+/g, ' ') // Replace multiple spaces/newlines with a single space
+		.toLowerCase(); // Case-insensitive comparison
 };
 
 // Function to split long text into chunks
@@ -78,7 +101,8 @@ const splitText = (text, maxLength) => {
 
 // Function to calculate hash of a message's content
 const calculateHash = (text) => {
-	return crypto.createHash('sha256').update(text).digest('hex');
+	const normalizedText = normalizeMessage(text);
+	return crypto.createHash('sha256').update(normalizedText).digest('hex');
 };
 
 // Function to filter low-context messages
@@ -92,6 +116,54 @@ const isLowContext = (text) => {
 	return keywordMatch && meaningfulText.length < 60; // Keywords but no big context
 };
 
+// Function to check if the product is profitable
+const isProfitableProduct = (text) => {
+	const profitableKeywords = [
+		'tv',
+		'tvs',
+		'4ktvs',
+		'4k',
+		'laptop',
+		'washing machine',
+		'ai',
+		'kg',
+		'12 kg',
+		'9 kg',
+		'7 kg',
+		'8 kg',
+		'6.5 kg',
+		'10 kg',
+		'8.5 kg',
+		'front load',
+		'top load',
+		'air conditioner',
+		'ac',
+		'acs',
+		'ton',
+		'refrigerator',
+		'653 l',
+		'single door',
+		'double door',
+		'triple door',
+		'side by side',
+		'intel',
+		'core',
+		'ryzen',
+		'bravia',
+	];
+
+	console.log('Text being checked:', text); // Log the text being checked
+
+	for (let keyword of profitableKeywords) {
+		const regex = new RegExp(`\\b${keyword}\\b`, 'i'); // Ensure proper boundary matching
+		if (regex.test(text)) {
+			console.log(`Match found for keyword: ${keyword}`); // Log matching keywords
+			return true;
+		}
+	}
+	return false;
+};
+
 // A simple delay function to simulate awaiting
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -101,6 +173,11 @@ bot.on('channel_post', async (ctx) => {
 	const messageId = message.message_id.toString();
 	const textContent = message.caption || message.text;
 
+	// Check if the message is recent
+	if (!isRecentMessage(message.date)) {
+		console.log('Skipping 5min old message :', textContent);
+		return;
+	}
 	// Check if the message is already processed by its hash
 	const messageHash = calculateHash(textContent);
 	if (contentHashes.includes(messageHash)) {
@@ -112,6 +189,14 @@ bot.on('channel_post', async (ctx) => {
 	if (isLowContext(textContent)) {
 		console.log('Skipping low-context message:', textContent);
 		return;
+	}
+
+	// Check if it's in sale mode and if the product is profitable
+	if (IS_SALE_MODE) {
+		if (!isProfitableProduct(textContent)) {
+			console.log('Skipping non-profitable product in sale mode:', textContent);
+			return;
+		}
 	}
 
 	// Add message ID and content hash to processed list
@@ -144,7 +229,7 @@ bot.on('channel_post', async (ctx) => {
 	}
 
 	// Delay to reduce race conditions
-	await delay(100);
+	await delay(300);
 });
 
 // Start the bot and check for launch errors
