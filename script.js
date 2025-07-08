@@ -40,10 +40,13 @@ const setLastProcessedMessageIds = (messageIds) => {
 
 // check if message is recent (within 5 minutes)
 const isRecentMessage = (messageDate) => {
-	const messageTimestamp = messageDate * 1000;
-	const currentTimestamp = Date.now();
-	return currentTimestamp - messageTimestamp <= 5 * 60 * 1000;
+    const messageTimestamp = messageDate * 1000;  // Convert Telegram timestamp (seconds) to milliseconds
+    const currentTimestamp = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
+    const currentDateInKolkata = new Date(currentTimestamp).getTime(); // Convert to milliseconds
+
+    return (currentDateInKolkata - messageTimestamp) <= (5 * 60 * 1000); // 5 minutes in milliseconds
 };
+
 
 // link remover
 const removeLinks = (text) => text.replace(/https?:\/\/\S+/g, '');
