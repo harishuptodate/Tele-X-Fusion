@@ -225,7 +225,18 @@ bot.on('channel_post', async (ctx) => {
 
 		console.log('Tweet posted successfully!');
 	} catch (error) {
-		console.error('Error posting tweet:', error);
+
+		if (error.code === 429 && error.headers) {
+			const userLimit = error.headers['x-user-limit-24hour-limit'];
+			const userRemaining = error.headers['x-user-limit-24hour-remaining'];
+			const userReset = error.headers['x-user-limit-24hour-reset'];
+
+			const userResetDate = new Date(Number(userReset) * 1000);
+			console.log(`🔒 User Tweet Limit: ${userLimit}, Remaining: ${userRemaining}`);
+			console.log(`🕒 User Limit Resets At: ${userResetDate.toString()}`);
+		} else {
+			console.error('Error posting tweet:', error);
+		}
 	}
 
 	await delay(300);
