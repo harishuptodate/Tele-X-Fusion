@@ -21,37 +21,26 @@ const twitterClient = new TwitterApi({
 });
 
 let contentHashes = [];
-
-// Check if it's sale mode
 const IS_SALE_MODE = process.env.IS_SALE_MODE === 'true';
 
-
-// Read and write processed message IDs
 const getLastProcessedMessageIds = () => {
 	if (!fs.existsSync(path)) return [];
 	const data = fs.readFileSync(path, 'utf-8');
 	return JSON.parse(data) || [];
 };
 
-// Write processed message IDs
 const setLastProcessedMessageIds = (messageIds) => {
 	fs.writeFileSync(path, JSON.stringify(messageIds), 'utf-8');
 };
 
-// check if message is recent (within 5 minutes)
 const isRecentMessage = (messageDate) => {
-    const messageTimestamp = messageDate * 1000;  // Convert Telegram timestamp (seconds) to milliseconds
-    const currentTimestamp = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
-    const currentDateInKolkata = new Date(currentTimestamp).getTime(); // Convert to milliseconds
-
-    return (currentDateInKolkata - messageTimestamp) <= (5 * 60 * 1000); // 5 minutes in milliseconds
+	const messageTimestamp = messageDate * 1000;
+	const currentTimestamp = Date.now();
+	return currentTimestamp - messageTimestamp <= 5 * 60 * 1000;
 };
-
 
 // link remover
 const removeLinks = (text) => text.replace(/https?:\/\/\S+/g, '');
-
-// replace with our own links and text 
 const replaceLinksAndText = (text) =>
 	text
 		.replace(
@@ -60,12 +49,9 @@ const replaceLinksAndText = (text) =>
 		)
 		.replace(/TRT Premium Deals/g, 'Deals24');
 
-// normalize message
 const normalizeMessage = (text) =>
 	removeLinks(text).trim().replace(/\s+/g, ' ').toLowerCase();
 
-
-// split text into chunks to tackle twitter's 280 character limit
 const splitText = (text, maxLength) => {
 	const words = text.split(' ');
 	const chunks = [];
@@ -82,13 +68,11 @@ const splitText = (text, maxLength) => {
 	return chunks;
 };
 
-// calculate hash to check for duplicate content
 const calculateHash = (text) => {
 	const normalizedText = normalizeMessage(text);
 	return crypto.createHash('sha256').update(normalizedText).digest('hex');
 };
 
-// check if message is low context, to skip low-context / unncessary messages 
 const isLowContext = (text) => {
 	const meaningfulText = text.replace(/https?:\/\/\S+/g, '').trim();
 	if (meaningfulText.length < 30) return true;
@@ -99,13 +83,6 @@ const isLowContext = (text) => {
 	return keywordMatch && meaningfulText.length < 60;
 };
 
-// check if message contains amazon link to skip posting its image
-const containsAmazonLink = (text) => {
-	const amazonRegex = /https?:\/\/(www\.)?(amzn\.to|amazon\.[a-z.]+)/gi;
-	return amazonRegex.test(text);
-};
-
-// check if product is profitable
 const isProfitableProduct = (text) => {
 	const profitableKeywords = [
 		'tv',
@@ -147,8 +124,6 @@ const isProfitableProduct = (text) => {
 	return false;
 };
 
-// to avoid rate limiting, we'll wait for 1 second before sending the next message...
-// to avoid race  conditions...
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Helper to get highest-quality image from photo array
@@ -160,7 +135,7 @@ const getHighestQualityPhoto = (photos) => {
 	);
 };
 
-// Download image file from Telegram
+// Download file from Telegram
 const downloadTelegramFile = async (fileId, botToken) => {
 	try {
 		const fileInfo = await fetch(
@@ -205,8 +180,6 @@ bot.on('channel_post', async (ctx) => {
 		return;
 	}
 
-	const containsAmazon = containsAmazonLink(textContent);
-
 	const processedMessageIds = getLastProcessedMessageIds();
 	processedMessageIds.push(messageId);
 	if (processedMessageIds.length > 10) processedMessageIds.shift();
@@ -221,7 +194,7 @@ bot.on('channel_post', async (ctx) => {
 		let tweetResponse;
 
 		// Image logic
-		if (message.photo && message.photo.length > 0 && !containsAmazon) {
+		if (message.photo && message.photo.length > 0) {
 			const bestPhoto = getHighestQualityPhoto(message.photo);
 			const imageBuffer = await downloadTelegramFile(
 				bestPhoto.file_id,
@@ -255,7 +228,7 @@ bot.on('channel_post', async (ctx) => {
 		console.error('Error posting tweet:', error);
 	}
 
-	await delay(200);
+	await delay(300);
 });
 
 bot
