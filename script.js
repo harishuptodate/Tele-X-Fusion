@@ -219,7 +219,7 @@ bot.on('channel_post', async (ctx) => {
 	contentHashes.push(messageHash);
 	if (contentHashes.length > 50) contentHashes.shift();
 
-	// const caption = replaceLinksAndText(textContent) + '\n\n#Deals24';
+	const caption = replaceLinksAndText(textContent) + '\n\n#Deals24';
 	
 	// Retrieve message text from database using messageId
 	const retrievedText = await getMessageTextById(messageId);
@@ -227,7 +227,7 @@ bot.on('channel_post', async (ctx) => {
 		console.log('Retrieved text from DB:', retrievedText);
 	}
 
-	const finalCaption = retrievedText + '\n\n#Deals24';
+	const finalCaption = retrievedText ? retrievedText + '\n\n#Deals24' : caption;
 	const captionChunks = splitText(finalCaption, 280);
 
 	
