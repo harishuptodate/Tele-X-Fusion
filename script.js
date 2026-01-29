@@ -187,8 +187,9 @@ bot.on('channel_post', async (ctx) => {
 	if (!textContent) return;
 
 	// Wait 9 seconds before proceeding
-	console.log('Waiting 9 seconds before processing message...');
-	await delay(9000);
+	console.log('Waiting 7 seconds before processing message...');
+	await delay(7000);
+	console.log('7 seconds passed');
 
 	if (!isRecentMessage(message.date)) {
 		console.log('Skipping old message:', textContent);
@@ -262,14 +263,18 @@ bot.on('channel_post', async (ctx) => {
 			tweetResponse = await twitterClient.v2.tweet(captionChunks[0]);
 		}
 
-		for (let i = 1; i < captionChunks.length; i++) {
-			tweetResponse = await twitterClient.v2.reply(
-				captionChunks[i],
-				tweetResponse.data.id,
-			);
+		// Only post replies if the initial tweet was successful
+		if (tweetResponse && tweetResponse.data) {
+			for (let i = 1; i < captionChunks.length; i++) {
+				tweetResponse = await twitterClient.v2.reply(
+					captionChunks[i],
+					tweetResponse.data.id,
+				);
+			}
+			console.log('Tweet posted successfully!');
+		} else {
+			console.log('Initial tweet failed, skipping reply tweets.');
 		}
-
-		console.log('Tweet posted successfully!');
 	} catch (error) {
 
 		if (error.code === 429 && error.headers) {
@@ -280,11 +285,13 @@ bot.on('channel_post', async (ctx) => {
 			const userResetDate = new Date(Number(userReset) * 1000);
 			console.log(`🔒 User Tweet Limit: ${userLimit}, Remaining: ${userRemaining}`);
 			console.log(`🕒 User Limit Resets At: ${userResetDate.toString()}`);
+			console.log('Skipping tweet posting due to rate limit.');
 		} else {
 			console.error('Error posting tweet:', error);
 		}
 	}
 
+	console.log('Message processing completed.');
 	await delay(300);
 });
 
