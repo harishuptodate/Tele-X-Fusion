@@ -6,6 +6,12 @@ const { TwitterApi } = require('twitter-api-v2');
 const express = require('express');
 const fetch = require('node-fetch');
 const path = './processedMessages.json';
+const mongoose = require('mongoose');
+const TelegramMessage = require('./models/TelegramMessage');
+
+mongoose.connect(process.env.MONGODB_URI)
+.then(() => console.log('Connected to MongoDB'))
+.catch((err) => console.error('Error connecting to MongoDB:', err));
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -32,6 +38,13 @@ const getLastProcessedMessageIds = () => {
 const setLastProcessedMessageIds = (messageIds) => {
 	fs.writeFileSync(path, JSON.stringify(messageIds), 'utf-8');
 };
+
+// Helper function to check if text contains Amazon links
+function hasAmazonLinks(text) {
+  if (!text) return false;
+  const amazonRegex = /(https?:\/\/)?(www\.)?(amazon\.[a-z]{2,}|amzn\.to)\/[^\s]*/gi;
+  return amazonRegex.test(text);
+}
 
 const isRecentMessage = (messageDate) => {
 	const messageTimestamp = messageDate * 1000;
@@ -126,6 +139,20 @@ const isProfitableProduct = (text) => {
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Function to get text from database using messageId
+const getMessageTextById = async (messageId) => {
+	try {
+		const message = await TelegramMessage.findOne({ messageId: messageId });
+		if (!message) {
+			return null;
+		}
+		return message.text;
+	} catch (error) {
+		console.error('Error retrieving message text:', error);
+		throw error;
+	}
+};
+
 // Helper to get highest-quality image from photo array
 const getHighestQualityPhoto = (photos) => {
 	if (!photos || photos.length === 0) return null;
@@ -159,6 +186,10 @@ bot.on('channel_post', async (ctx) => {
 	const textContent = message.caption || message.text;
 	if (!textContent) return;
 
+	// Wait 9 seconds before proceeding
+	console.log('Waiting 9 seconds before processing message...');
+	await delay(9000);
+
 	if (!isRecentMessage(message.date)) {
 		console.log('Skipping old message:', textContent);
 		return;
@@ -187,14 +218,26 @@ bot.on('channel_post', async (ctx) => {
 	contentHashes.push(messageHash);
 	if (contentHashes.length > 50) contentHashes.shift();
 
-	const caption = replaceLinksAndText(textContent) + '\n\n#Deals24';
-	const captionChunks = splitText(caption, 280);
+	// const caption = replaceLinksAndText(textContent) + '\n\n#Deals24';
+	
+	// Retrieve message text from database using messageId
+	const retrievedText = await getMessageTextById(messageId);
+	if (retrievedText) {
+		console.log('Retrieved text from DB:', retrievedText);
+	}
 
+	const finalCaption = retrievedText + '\n\n#Deals24';
+	const captionChunks = splitText(finalCaption, 280);
+
+	
 	try {
 		let tweetResponse;
 
-		// Image logic
-		if (message.photo && message.photo.length > 0) {
+		// Check if message has Amazon links - skip image logic if it does
+		const hasAmazonLink = hasAmazonLinks(retrievedText) || hasAmazonLinks(textContent);
+		
+		// Image logic - skip if Amazon links are present
+		if (!hasAmazonLink && message.photo && message.photo.length > 0) {
 			const bestPhoto = getHighestQualityPhoto(message.photo);
 			const imageBuffer = await downloadTelegramFile(
 				bestPhoto.file_id,
@@ -213,6 +256,9 @@ bot.on('channel_post', async (ctx) => {
 				tweetResponse = await twitterClient.v2.tweet(captionChunks[0]);
 			}
 		} else {
+			if (hasAmazonLink) {
+				console.log('Amazon links detected, posting text only without image.');
+			}
 			tweetResponse = await twitterClient.v2.tweet(captionChunks[0]);
 		}
 
