@@ -7,7 +7,6 @@ const http = require('http');
 const fetch = require('node-fetch');
 const mongoose = require('mongoose');
 const TelegramMessage = require('./models/TelegramMessage');
-const RateLimitConfig = require('./models/RateLimitConfig');
 
 // Configuration constants
 const CONFIG = {
@@ -55,67 +54,148 @@ const LOW_CONTEXT_KEYWORDS = ['loot', 'deal', 'link', 'fast', 'price drop'];
 
 const PORT = CONFIG.PORT;
 
-// Store rate limit information (will be persisted)
-let rateLimitInfo = {
+// JSON file paths
+const PROCESSED_MESSAGES_FILE = './processedMessages.json';
+const RATE_LIMIT_STATE_FILE = './rateLimitState.json';
+
+// Store rate limit information (loaded from JSON)
+let rateLimitState = {
 	limit: null,
 	remaining: null,
 	resetAt: null,
-	lastUpdated: null
+	lastUpdated: null,
+	successfulTweetsCount: 0,
+	lastErrorOccurredAt: null
 };
 
 // Use Set for O(1) hash lookups instead of array
 const contentHashes = new Set();
+
+// JSON Storage Helper Functions
+const loadProcessedMessageIds = async () => {
+	try {
+		const data = await fs.readFile(PROCESSED_MESSAGES_FILE, 'utf-8');
+		const parsed = JSON.parse(data);
+		return parsed.messageIds || [];
+	} catch (error) {
+		if (error.code === 'ENOENT') {
+			// File doesn't exist, return empty array
+			return [];
+		}
+		console.error('Error loading processed message IDs:', error.message);
+		return [];
+	}
+};
+
+const saveProcessedMessageIds = async (messageIds) => {
+	try {
+		// Keep only last 10 messageIds
+		const last10 = messageIds.slice(-CONFIG.MAX_PROCESSED_MESSAGE_IDS);
+		const data = { messageIds: last10 };
+		await fs.writeFile(PROCESSED_MESSAGES_FILE, JSON.stringify(data, null, 2), 'utf-8');
+	} catch (error) {
+		console.error('Error saving processed message IDs:', error.message);
+	}
+};
+
+const isMessagePostedToTwitter = async (messageId) => {
+	try {
+		const messageIds = await loadProcessedMessageIds();
+		return messageIds.includes(messageId);
+	} catch (error) {
+		console.error('Error checking if message was posted:', error.message);
+		return false; // On error, assume not posted to avoid skipping
+	}
+};
+
+const addMessageToProcessed = async (messageId) => {
+	try {
+		const messageIds = await loadProcessedMessageIds();
+		// Remove if already exists (to avoid duplicates)
+		const filtered = messageIds.filter(id => id !== messageId);
+		// Add to end
+		filtered.push(messageId);
+		await saveProcessedMessageIds(filtered);
+	} catch (error) {
+		console.error('Error adding message to processed list:', error.message);
+	}
+};
+
+const loadRateLimitState = async () => {
+	try {
+		const data = await fs.readFile(RATE_LIMIT_STATE_FILE, 'utf-8');
+		const parsed = JSON.parse(data);
+		rateLimitState = {
+			limit: parsed.limit || null,
+			remaining: parsed.remaining !== undefined ? parsed.remaining : null,
+			resetAt: parsed.resetAt || null,
+			lastUpdated: parsed.lastUpdated || null,
+			successfulTweetsCount: parsed.successfulTweetsCount || 0,
+			lastErrorOccurredAt: parsed.lastErrorOccurredAt || null
+		};
+		console.log('Loaded rate limit state from JSON');
+	} catch (error) {
+		if (error.code === 'ENOENT') {
+			// File doesn't exist, use defaults
+			console.log('Rate limit state file not found, using defaults');
+		} else {
+			console.error('Error loading rate limit state:', error.message);
+		}
+	}
+};
+
+const saveRateLimitState = async () => {
+	try {
+		rateLimitState.lastUpdated = new Date().toISOString();
+		await fs.writeFile(RATE_LIMIT_STATE_FILE, JSON.stringify(rateLimitState, null, 2), 'utf-8');
+	} catch (error) {
+		console.error('Error saving rate limit state:', error.message);
+	}
+};
+
+const incrementSuccessfulTweetCount = async () => {
+	rateLimitState.successfulTweetsCount = (rateLimitState.successfulTweetsCount || 0) + 1;
+	if (rateLimitState.limit !== null) {
+		rateLimitState.remaining = Math.max(0, rateLimitState.remaining - 1);
+	}
+	await saveRateLimitState();
+};
+
+const handleRateLimitError = async (error) => {
+	if (error.code === 429 && error.headers) {
+		const userLimit = error.headers['x-user-limit-24hour-limit'];
+		const userRemaining = error.headers['x-user-limit-24hour-remaining'];
+		const userReset = error.headers['x-user-limit-24hour-reset'];
+
+		const userResetDate = new Date(Number(userReset) * 1000);
+		
+		// Store rate limit info from error
+		rateLimitState = {
+			limit: userLimit ? parseInt(userLimit) : rateLimitState.limit,
+			remaining: userRemaining ? parseInt(userRemaining) : rateLimitState.remaining,
+			resetAt: userResetDate.toISOString(),
+			lastUpdated: new Date().toISOString(),
+			successfulTweetsCount: rateLimitState.successfulTweetsCount || 0,
+			lastErrorOccurredAt: new Date().toISOString()
+		};
+		
+		await saveRateLimitState();
+		
+		console.log(`🔒 User Tweet Limit: ${rateLimitState.limit}, Remaining: ${rateLimitState.remaining}`);
+		console.log(`🕒 User Limit Resets At: ${userResetDate.toString()}`);
+		console.log('Skipping tweet posting due to rate limit.');
+	}
+};
 
 // MongoDB connection with retry logic
 const connectMongoDB = async () => {
 	try {
 		await mongoose.connect(process.env.MONGODB_URI, CONFIG.MONGODB_CONNECTION_OPTIONS);
 		console.log('Connected to MongoDB');
-		
-		// Load rate limit info from database on startup
-		await loadRateLimitInfo();
 	} catch (error) {
 		console.error('Error connecting to MongoDB:', error);
 		// Retry connection after 5 seconds
 		setTimeout(connectMongoDB, 5000);
-	}
-};
-
-// Load rate limit info from database
-const loadRateLimitInfo = async () => {
-	try {
-		const config = await RateLimitConfig.findOne();
-		if (config) {
-			rateLimitInfo = {
-				limit: config.limit,
-				remaining: config.remaining,
-				resetAt: config.resetAt ? config.resetAt.toString() : null,
-				lastUpdated: config.lastUpdated ? config.lastUpdated.toISOString() : null
-			};
-			console.log('Loaded rate limit info from database');
-		}
-	} catch (error) {
-		console.error('Error loading rate limit info:', error);
-		// Non-critical, continue without it
-	}
-};
-
-// Save rate limit info to database
-const saveRateLimitInfo = async () => {
-	try {
-		await RateLimitConfig.findOneAndUpdate(
-			{},
-			{
-				limit: rateLimitInfo.limit,
-				remaining: rateLimitInfo.remaining,
-				resetAt: rateLimitInfo.resetAt ? new Date(rateLimitInfo.resetAt) : null,
-				lastUpdated: new Date()
-			},
-			{ upsert: true, new: true }
-		);
-	} catch (error) {
-		console.error('Error saving rate limit info:', error);
-		// Non-critical, continue without saving
 	}
 };
 
@@ -125,16 +205,30 @@ const server = http.createServer((req, res) => {
 	if (req.method === 'GET' && req.url === '/') {
 		let response = 'Bot is running!<br><br>';
 		
-		if (rateLimitInfo.limit !== null) {
-			response += `🔒 User Tweet Limit: ${rateLimitInfo.limit}, Remaining: ${rateLimitInfo.remaining}<br>`;
-			if (rateLimitInfo.resetAt) {
-				response += `🕒 User Limit Resets At: ${rateLimitInfo.resetAt}<br>`;
+		if (rateLimitState.limit !== null) {
+			// Calculate real-time remaining: limit - successfulTweetsCount
+			const realTimeRemaining = rateLimitState.limit - (rateLimitState.successfulTweetsCount || 0);
+			
+			response += `🔒 Total Tweet Limit: ${rateLimitState.limit}<br>`;
+			response += `✅ Successful Tweets Today: ${rateLimitState.successfulTweetsCount || 0}<br>`;
+			response += `📊 Real-Time Remaining: ${realTimeRemaining}<br>`;
+			
+			if (rateLimitState.resetAt) {
+				const resetDate = new Date(rateLimitState.resetAt);
+				response += `🕒 Limit Resets At: ${resetDate.toLocaleString()}<br>`;
 			}
-			if (rateLimitInfo.lastUpdated) {
-				response += `Last Updated: ${rateLimitInfo.lastUpdated}`;
+			
+			if (rateLimitState.lastErrorOccurredAt) {
+				const errorDate = new Date(rateLimitState.lastErrorOccurredAt);
+				response += `⚠️ Last Rate Limit Error: ${errorDate.toLocaleString()}<br>`;
+			}
+			
+			if (rateLimitState.lastUpdated) {
+				response += `🔄 Last Updated: ${new Date(rateLimitState.lastUpdated).toLocaleString()}`;
 			}
 		} else {
-			response += 'Rate limit information not available yet.';
+			response += 'Rate limit information not available yet.<br>';
+			response += 'Waiting for first rate limit error or successful tweet.';
 		}
 		
 		res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -158,11 +252,15 @@ const twitterClient = new TwitterApi({
 
 // Check if we should proceed with Twitter API call based on rate limits
 const canMakeTwitterRequest = () => {
-	if (rateLimitInfo.remaining === null || rateLimitInfo.remaining === undefined) {
-		return true; // No info available, proceed
+	if (rateLimitState.limit === null) {
+		return true; // No limit info available, proceed
 	}
-	if (rateLimitInfo.remaining <= 0) {
-		console.log('Rate limit reached, skipping Twitter API call');
+	
+	// Calculate real-time remaining: limit - successfulTweetsCount
+	const realTimeRemaining = rateLimitState.limit - (rateLimitState.successfulTweetsCount || 0);
+	
+	if (realTimeRemaining <= 0) {
+		console.log(`Rate limit reached. Limit: ${rateLimitState.limit}, Posted: ${rateLimitState.successfulTweetsCount}, Remaining: ${realTimeRemaining}`);
 		return false;
 	}
 	return true;
@@ -273,19 +371,6 @@ const getMessageTextById = async (messageId) => {
 	}
 };
 
-// Check if message was already processed using MongoDB
-const isMessageProcessed = async (messageId) => {
-	try {
-		const message = await TelegramMessage.findOne(
-			{ messageId: messageId },
-			{ _id: 1 } // Only check existence
-		);
-		return !!message;
-	} catch (error) {
-		console.error('Error checking if message is processed:', error.message);
-		return false; // On error, assume not processed to avoid skipping messages
-	}
-};
 
 // Helper to get highest-quality image from photo array
 const getHighestQualityPhoto = (photos) => {
@@ -370,6 +455,13 @@ bot.on('channel_post', async (ctx) => {
 			return;
 		}
 
+		// FIRST: Check if messageId was already posted to Twitter (preserve 17 tweets/day limit)
+		const alreadyPosted = await isMessagePostedToTwitter(messageId);
+		if (alreadyPosted) {
+			console.log('Skipping message already posted to Twitter:', messageId);
+			return;
+		}
+
 		// Wait before proceeding
 		console.log(`Waiting ${CONFIG.MESSAGE_PROCESSING_DELAY_MS / 1000} seconds before processing message...`);
 		await delay(CONFIG.MESSAGE_PROCESSING_DELAY_MS);
@@ -385,13 +477,6 @@ bot.on('channel_post', async (ctx) => {
 		const messageHash = calculateHash(textContent);
 		if (contentHashes.has(messageHash)) {
 			console.log('Skipping duplicate content.');
-			return;
-		}
-
-		// Check if message was already processed (using MongoDB)
-		const alreadyProcessed = await isMessageProcessed(messageId);
-		if (alreadyProcessed) {
-			console.log('Skipping already processed message:', messageId);
 			return;
 		}
 
@@ -417,21 +502,18 @@ bot.on('channel_post', async (ctx) => {
 			hashArray.forEach(hash => contentHashes.add(hash));
 		}
 
-		// Process caption
-		const processedCaption = replaceLinksAndText(textContent);
-		const captionWithHashtag = processedCaption + '\n\n#Deals24';
-		
-		// Retrieve message text from database using messageId
+		// Check DB for better caption text (only for caption, not for posting check)
 		const retrievedText = await getMessageTextById(messageId);
 		
-		// Fix: Initialize finalCaption properly for both code paths
-		let finalCaption;
+		// Process caption - use DB text if available (better caption), otherwise use Telegram text
+		const processedCaption = replaceLinksAndText(retrievedText || textContent);
+		const captionWithHashtag = processedCaption + '\n\n#Deals24';
+		
+		let finalCaption = captionWithHashtag;
 		if (retrievedText) {
-			console.log('Retrieved text from DB:', retrievedText.substring(0, 100));
-			finalCaption = replaceLinksAndText(retrievedText) + '\n\n#Deals24';
+			console.log('Using better caption from DB:', retrievedText.substring(0, 100));
 		} else {
-			console.log('No text found in DB for messageId:', messageId);
-			finalCaption = captionWithHashtag;
+			console.log('No text found in DB for messageId, using Telegram text:', messageId);
 		}
 
 		const captionChunks = splitText(finalCaption, CONFIG.TWEET_MAX_LENGTH);
@@ -492,32 +574,18 @@ bot.on('channel_post', async (ctx) => {
 						tweetResponse.data.id,
 					);
 				}
+				
+				// After successful tweet: add messageId to processed list and update rate limit
+				await addMessageToProcessed(messageId);
+				await incrementSuccessfulTweetCount();
 				console.log('Tweet posted successfully!');
 			} else {
 				console.log('Initial tweet failed, skipping reply tweets.');
 			}
 		} catch (error) {
 			if (error.code === 429 && error.headers) {
-				const userLimit = error.headers['x-user-limit-24hour-limit'];
-				const userRemaining = error.headers['x-user-limit-24hour-remaining'];
-				const userReset = error.headers['x-user-limit-24hour-reset'];
-
-				const userResetDate = new Date(Number(userReset) * 1000);
-				
-				// Store rate limit info
-				rateLimitInfo = {
-					limit: userLimit,
-					remaining: userRemaining,
-					resetAt: userResetDate.toString(),
-					lastUpdated: new Date().toISOString()
-				};
-				
-				// Persist to database
-				await saveRateLimitInfo();
-				
-				console.log(`🔒 User Tweet Limit: ${userLimit}, Remaining: ${userRemaining}`);
-				console.log(`🕒 User Limit Resets At: ${userResetDate.toString()}`);
-				console.log('Skipping tweet posting due to rate limit.');
+				// Handle rate limit error - store limit info from headers
+				await handleRateLimitError(error);
 			} else {
 				logError('Tweet posting', error, { messageId, textContent: textContent.substring(0, 100) });
 			}
@@ -530,8 +598,11 @@ bot.on('channel_post', async (ctx) => {
 	}
 });
 
-// Connect to MongoDB and start bot
-connectMongoDB();
+// Load rate limit state and connect to MongoDB on startup
+(async () => {
+	await loadRateLimitState();
+	connectMongoDB();
+})();
 
 bot
 	.launch()
@@ -544,7 +615,7 @@ bot
 // Graceful shutdown
 process.on('SIGINT', async () => {
 	console.log('Shutting down gracefully...');
-	await saveRateLimitInfo();
+	await saveRateLimitState();
 	bot.stop('SIGINT');
 	mongoose.connection.close();
 	process.exit(0);
@@ -552,7 +623,7 @@ process.on('SIGINT', async () => {
 
 process.on('SIGTERM', async () => {
 	console.log('Shutting down gracefully...');
-	await saveRateLimitInfo();
+	await saveRateLimitState();
 	bot.stop('SIGTERM');
 	mongoose.connection.close();
 	process.exit(0);
