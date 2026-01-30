@@ -15,7 +15,23 @@ mongoose.connect(process.env.MONGODB_URI)
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('Bot is running!'));
+app.get('/', (req, res) => {
+	let response = 'Bot is running!<br><br>';
+	
+	if (rateLimitInfo.limit !== null) {
+		response += `🔒 User Tweet Limit: ${rateLimitInfo.limit}, Remaining: ${rateLimitInfo.remaining}<br>`;
+		if (rateLimitInfo.resetAt) {
+			response += `🕒 User Limit Resets At: ${rateLimitInfo.resetAt}<br>`;
+		}
+		if (rateLimitInfo.lastUpdated) {
+			response += `Last Updated: ${rateLimitInfo.lastUpdated}`;
+		}
+	} else {
+		response += 'Rate limit information not available yet.';
+	}
+	
+	res.send(response);
+});
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
@@ -28,6 +44,14 @@ const twitterClient = new TwitterApi({
 
 let contentHashes = [];
 const IS_SALE_MODE = process.env.IS_SALE_MODE === 'true';
+
+// Store rate limit information
+let rateLimitInfo = {
+	limit: null,
+	remaining: null,
+	resetAt: null,
+	lastUpdated: null
+};
 
 const getLastProcessedMessageIds = () => {
 	if (!fs.existsSync(path)) return [];
@@ -283,6 +307,15 @@ bot.on('channel_post', async (ctx) => {
 			const userReset = error.headers['x-user-limit-24hour-reset'];
 
 			const userResetDate = new Date(Number(userReset) * 1000);
+			
+			// Store rate limit info for the route
+			rateLimitInfo = {
+				limit: userLimit,
+				remaining: userRemaining,
+				resetAt: userResetDate.toString(),
+				lastUpdated: new Date().toISOString()
+			};
+			
 			console.log(`🔒 User Tweet Limit: ${userLimit}, Remaining: ${userRemaining}`);
 			console.log(`🕒 User Limit Resets At: ${userResetDate.toString()}`);
 			console.log('Skipping tweet posting due to rate limit.');
