@@ -3,22 +3,23 @@ const fs = require('fs').promises;
 const crypto = require('crypto');
 const { Telegraf } = require('telegraf');
 const { TwitterApi } = require('twitter-api-v2');
-const express = require('express');
+const http = require('http');
 const fetch = require('node-fetch');
 const mongoose = require('mongoose');
 const TelegramMessage = require('./models/TelegramMessage');
+const RateLimitConfig = require('./models/RateLimitConfig');
 
 // Configuration constants
 const CONFIG = {
 	PORT: process.env.PORT || 3000,
 	MESSAGE_PROCESSING_DELAY_MS: 7000,
-	MESSAGE_RECENCY_THRESHOLD_MS: 5 * 60 * 1000,
-	MAX_CONTENT_HASHES: 50,
-	MAX_PROCESSED_MESSAGE_IDS: 10,
-	TWEET_MAX_LENGTH: 280,
-	POST_PROCESSING_DELAY_MS: 300,
-	MIN_CONTEXT_LENGTH: 30,
-	LOW_CONTEXT_LENGTH: 60,
+	MESSAGE_RECENCY_THRESHOLD_MS: 5 * 60 * 1000, // 5 minutes
+	MAX_CONTENT_HASHES: 50, // Maximum number of content hashes to store
+	MAX_PROCESSED_MESSAGE_IDS: 10, // Maximum number of processed message IDs to store
+	TWEET_MAX_LENGTH: 280, // Maximum length of a tweet
+	POST_PROCESSING_DELAY_MS: 300, // Delay after posting a tweet
+	MIN_CONTEXT_LENGTH: 30, // Minimum length of a context
+	LOW_CONTEXT_LENGTH: 60, // Minimum length of a low-context message
 	MONGODB_CONNECTION_OPTIONS: {
 		maxPoolSize: 10,
 		serverSelectionTimeoutMS: 5000,
@@ -52,8 +53,6 @@ const PROFITABLE_PRODUCT_REGEXES = PROFITABLE_KEYWORDS.map(
 
 const LOW_CONTEXT_KEYWORDS = ['loot', 'deal', 'link', 'fast', 'price drop'];
 
-// Initialize Express app
-const app = express();
 const PORT = CONFIG.PORT;
 
 // Store rate limit information (will be persisted)
@@ -85,14 +84,6 @@ const connectMongoDB = async () => {
 // Load rate limit info from database
 const loadRateLimitInfo = async () => {
 	try {
-		// Try to load from a simple document (we'll create a simple config collection)
-		const RateLimitConfig = mongoose.model('RateLimitConfig', new mongoose.Schema({
-			limit: Number,
-			remaining: Number,
-			resetAt: Date,
-			lastUpdated: Date
-		}, { collection: 'ratelimitconfig' }));
-		
 		const config = await RateLimitConfig.findOne();
 		if (config) {
 			rateLimitInfo = {
@@ -112,13 +103,6 @@ const loadRateLimitInfo = async () => {
 // Save rate limit info to database
 const saveRateLimitInfo = async () => {
 	try {
-		const RateLimitConfig = mongoose.model('RateLimitConfig', new mongoose.Schema({
-			limit: Number,
-			remaining: Number,
-			resetAt: Date,
-			lastUpdated: Date
-		}, { collection: 'ratelimitconfig' }));
-		
 		await RateLimitConfig.findOneAndUpdate(
 			{},
 			{
@@ -135,26 +119,33 @@ const saveRateLimitInfo = async () => {
 	}
 };
 
-// Health check endpoint
-app.get('/', (req, res) => {
-	let response = 'Bot is running!<br><br>';
-	
-	if (rateLimitInfo.limit !== null) {
-		response += `🔒 User Tweet Limit: ${rateLimitInfo.limit}, Remaining: ${rateLimitInfo.remaining}<br>`;
-		if (rateLimitInfo.resetAt) {
-			response += `🕒 User Limit Resets At: ${rateLimitInfo.resetAt}<br>`;
+// Health check server using Node's built-in http module
+const server = http.createServer((req, res) => {
+	// Only handle GET requests to root path
+	if (req.method === 'GET' && req.url === '/') {
+		let response = 'Bot is running!<br><br>';
+		
+		if (rateLimitInfo.limit !== null) {
+			response += `🔒 User Tweet Limit: ${rateLimitInfo.limit}, Remaining: ${rateLimitInfo.remaining}<br>`;
+			if (rateLimitInfo.resetAt) {
+				response += `🕒 User Limit Resets At: ${rateLimitInfo.resetAt}<br>`;
+			}
+			if (rateLimitInfo.lastUpdated) {
+				response += `Last Updated: ${rateLimitInfo.lastUpdated}`;
+			}
+		} else {
+			response += 'Rate limit information not available yet.';
 		}
-		if (rateLimitInfo.lastUpdated) {
-			response += `Last Updated: ${rateLimitInfo.lastUpdated}`;
-		}
+		
+		res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+		res.end(response);
 	} else {
-		response += 'Rate limit information not available yet.';
+		res.writeHead(404, { 'Content-Type': 'text/plain' });
+		res.end('Not Found');
 	}
-	
-	res.send(response);
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
 // Initialize bot and Twitter client
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
