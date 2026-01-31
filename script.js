@@ -202,7 +202,7 @@ const connectMongoDB = async () => {
 // Initialize Express app
 const app = express();
 
-// Middleware to parse JSON bodies
+// Middleware to parse JSON bodies (but preserve raw body for webhook)
 app.use(express.json());
 
 // Health check route
@@ -236,6 +236,14 @@ app.get('/', (req, res) => {
 	}
 	
 	res.send(response);
+});
+
+// Test endpoint to verify webhook is reachable
+app.get('/api/webhook/test', (req, res) => {
+	res.json({ 
+		status: 'Webhook endpoint is reachable',
+		timestamp: new Date().toISOString()
+	});
 });
 
 // Initialize bot and Twitter client
@@ -434,7 +442,13 @@ const logError = (context, error, additionalInfo = {}) => {
 // Message listener
 bot.on('channel_post', async (ctx) => {
 	try {
+		console.log('Channel post received!');
 		const message = ctx.channelPost;
+		
+		if (!message) {
+			console.log('No channelPost found in context');
+			return;
+		}
 		
 		// Input validation
 		try {
@@ -446,6 +460,8 @@ bot.on('channel_post', async (ctx) => {
 		
 		const messageId = message.message_id.toString();
 		const textContent = message.caption || message.text;
+		
+		console.log(`Processing message ID: ${messageId}, Text preview: ${textContent ? textContent.substring(0, 50) : 'No text'}`);
 		
 		if (!textContent) {
 			console.log('Skipping message without text content');
@@ -598,9 +614,15 @@ bot.on('channel_post', async (ctx) => {
 // Webhook endpoint for Telegram
 app.post('/api/webhook', async (req, res) => {
 	try {
+		console.log('Webhook received:', JSON.stringify(req.body, null, 2));
+		
+		// Handle the update with the bot
 		await bot.handleUpdate(req.body);
+		
+		console.log('Webhook processed successfully');
 		res.sendStatus(200);
 	} catch (error) {
+		console.error('Error processing webhook:', error);
 		logError('Webhook handler', error);
 		res.sendStatus(500);
 	}
