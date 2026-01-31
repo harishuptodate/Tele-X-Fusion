@@ -41,7 +41,6 @@ router.get('/', (req, res) => {
 router.post('/webhook', async (req, res) => {
 	try {
 		console.log('=== WEBHOOK REQUEST RECEIVED ===');
-		console.log('Body:', JSON.stringify(req.body, null, 2));
 		
 		const update = req.body;
 		

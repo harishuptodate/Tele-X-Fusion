@@ -66,7 +66,7 @@ const handleChannelPost = async (updateOrCtx) => {
 
 		// Check if message is recent
 		if (!isRecentMessage(message.date)) {
-			console.log('Skipping old message:', textContent.substring(0, 100));
+			console.log('Skipping old message:', textContent.substring(0, 50));
 			return;
 		}
 
@@ -79,7 +79,7 @@ const handleChannelPost = async (updateOrCtx) => {
 
 		// Filter low-context messages
 		if (isLowContext(textContent)) {
-			console.log('Skipping low-context message:', textContent.substring(0, 100));
+			console.log('Skipping low-context message:', textContent.substring(0, 50));
 			return;
 		}
 
@@ -107,7 +107,7 @@ const handleChannelPost = async (updateOrCtx) => {
 		
 		let finalCaption = captionWithHashtag;
 		if (retrievedText) {
-			console.log('Using better caption from DB:', retrievedText.substring(0, 100));
+			console.log('Using better caption from DB:', retrievedText.substring(0, 50));
 		} else {
 			console.log('No text found in DB for messageId, using Telegram text:', messageId);
 		}

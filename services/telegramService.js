@@ -1,22 +1,41 @@
 const fetch = require('node-fetch');
 const TelegramMessage = require('../models/TelegramMessage');
+const { delay } = require('../utils/logger');
 
-const getMessageTextById = async (messageId) => {
+const getMessageTextById = async (messageId, retryCount = 0) => {
 	if (!messageId) {
 		console.error('getMessageTextById: messageId is required');
 		return null;
 	}
+	
+	const MAX_RETRIES = 3;
+	const RETRY_DELAY_MS = 2000;
+	
 	try {
 		const message = await TelegramMessage.findOne(
 			{ messageId: messageId },
 			{ text: 1 }
 		);
+		
 		if (!message) {
+			// No text found - retry if we haven't exceeded max retries
+			if (retryCount < MAX_RETRIES) {
+				console.log(`No text found in DB for messageId: ${messageId}, retrying... (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+				await delay(RETRY_DELAY_MS);
+				return getMessageTextById(messageId, retryCount + 1);
+			}
 			return null;
 		}
+		
 		return message.text;
 	} catch (error) {
-		console.error('Error retrieving message text:', error.message);
+		// On error, retry if we haven't exceeded max retries
+		if (retryCount < MAX_RETRIES) {
+			console.error(`Error retrieving message text (attempt ${retryCount + 1}/${MAX_RETRIES}):`, error.message);
+			await delay(RETRY_DELAY_MS);
+			return getMessageTextById(messageId, retryCount + 1);
+		}
+		console.error('Error retrieving message text after retries:', error.message);
 		return null;
 	}
 };
