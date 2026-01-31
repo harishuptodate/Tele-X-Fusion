@@ -2,7 +2,7 @@ require('dotenv').config();
 
 module.exports = {
 	PORT: process.env.PORT || 3000,
-	MESSAGE_PROCESSING_DELAY_MS: 7000,
+	MESSAGE_PROCESSING_DELAY_MS: 10000,
 	MESSAGE_RECENCY_THRESHOLD_MS: 5 * 60 * 1000, // 5 minutes
 	MAX_CONTENT_HASHES: 50,
 	MAX_PROCESSED_MESSAGE_IDS: 10,
@@ -31,7 +31,5 @@ module.exports = {
 		'side by side', 'intel', 'core', 'ryzen', 'bravia',
 	],
 	LOW_CONTEXT_KEYWORDS: ['loot', 'deal', 'link', 'fast', 'price drop'],
-	PROCESSED_MESSAGES_FILE: './processedMessages.json',
-	RATE_LIMIT_STATE_FILE: './rateLimitState.json',
 };
 

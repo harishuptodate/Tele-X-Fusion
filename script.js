@@ -14,15 +14,15 @@ const app = express();
 app.use(express.json());
 
 // Routes
-app.use('/api', routes);
+app.use('/', routes);
 
 // Connect to MongoDB and start server
 mongoose.connect(process.env.MONGODB_URI, CONFIG.MONGODB_CONNECTION_OPTIONS)
-	.then(() => {
+	.then(async () => {
 		console.log('Connected to MongoDB');
 		
 		// Load rate limit state
-		loadRateLimitState();
+		await loadRateLimitState();
 		
 		// Start the server
 		app.listen(CONFIG.PORT, () => {

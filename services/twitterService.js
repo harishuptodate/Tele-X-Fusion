@@ -16,7 +16,7 @@ const twitterClient = new TwitterApi({
 });
 
 const postTweet = async (captionChunks, message, retrievedText, textContent) => {
-	if (!canMakeTwitterRequest()) {
+	if (!(await canMakeTwitterRequest())) {
 		console.log('Rate limit reached, skipping tweet posting');
 		return false;
 	}
@@ -59,7 +59,7 @@ const postTweet = async (captionChunks, message, retrievedText, textContent) => 
 		// Post replies if initial tweet was successful
 		if (tweetResponse && tweetResponse.data) {
 			for (let i = 1; i < captionChunks.length; i++) {
-				if (!canMakeTwitterRequest()) {
+				if (!(await canMakeTwitterRequest())) {
 					console.log('Rate limit reached while posting replies, stopping');
 					break;
 				}

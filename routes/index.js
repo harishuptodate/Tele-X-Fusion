@@ -5,16 +5,17 @@ const { handleChannelPost } = require('../handlers/channelPostHandler');
 const router = express.Router();
 
 // Health check route
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
 	let response = 'Bot is running!<br><br>';
-	const rateLimitState = getRateLimitState();
+	const rateLimitState = await getRateLimitState();
 	
 	if (rateLimitState.limit !== null) {
-		const realTimeRemaining = rateLimitState.limit - (rateLimitState.successfulTweetsCount || 0);
-		
 		response += `🔒 Total Tweet Limit: ${rateLimitState.limit}<br>`;
 		response += `✅ Successful Tweets Today: ${rateLimitState.successfulTweetsCount || 0}<br>`;
-		response += `📊 Real-Time Remaining: ${realTimeRemaining}<br>`;
+		
+		if (rateLimitState.remaining !== null) {
+			response += `📊 Remaining: ${rateLimitState.remaining}<br>`;
+		}
 		
 		if (rateLimitState.resetAt) {
 			const resetDate = new Date(rateLimitState.resetAt);
@@ -67,14 +68,6 @@ router.get('/webhook', (req, res) => {
 	res.json({ 
 		status: 'Webhook endpoint is active',
 		method: 'GET',
-		timestamp: new Date().toISOString()
-	});
-});
-
-// Test endpoint
-router.get('/webhook/test', (req, res) => {
-	res.json({ 
-		status: 'Webhook endpoint is reachable',
 		timestamp: new Date().toISOString()
 	});
 });

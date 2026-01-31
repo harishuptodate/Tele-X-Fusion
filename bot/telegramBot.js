@@ -22,7 +22,7 @@ const initTelegramBot = () => {
 		setupBotHandlers(bot);
 		
 		// Set webhook URL
-		const webhookUrl = process.env.WEBHOOK_URL || 'https://tele-x-fusion-main.onrender.com/api/webhook';
+		const webhookUrl = process.env.WEBHOOK_URL || 'https://tele-x-fusion-main.onrender.com/webhook';
 		
 		bot.telegram.setWebhook(webhookUrl, {
 			drop_pending_updates: true,
@@ -30,10 +30,6 @@ const initTelegramBot = () => {
 		})
 			.then(() => {
 				console.log(`Webhook set to: ${webhookUrl}`);
-				return bot.telegram.getWebhookInfo();
-			})
-			.then((webhookInfo) => {
-				console.log('Webhook info:', JSON.stringify(webhookInfo, null, 2));
 			})
 			.catch(error => {
 				console.error('Failed to set webhook:', error.message);
