@@ -617,11 +617,37 @@ app.listen(PORT, async () => {
 	// Set webhook URL
 	const webhookUrl = 'https://tele-x-fusion-main.onrender.com/api/webhook';
 	try {
-		await bot.telegram.setWebhook(webhookUrl);
+		// Delete any existing webhook first to avoid conflicts
+		await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+		
+		// Set the new webhook
+		await bot.telegram.setWebhook(webhookUrl, {
+			drop_pending_updates: true
+		});
 		console.log(`Webhook set to: ${webhookUrl}`);
+		
+		// Verify webhook info
+		const webhookInfo = await bot.telegram.getWebhookInfo();
+		console.log('Webhook info:', JSON.stringify(webhookInfo, null, 2));
 	} catch (error) {
-		logError('Webhook setup', error);
-		console.log('Continuing without webhook setup...');
+		// 409 errors are expected when switching from polling to webhook
+		if (error.response?.error_code === 409) {
+			console.log('Webhook conflict resolved (this is normal when switching from polling)');
+			// Try setting webhook again after a brief delay
+			setTimeout(async () => {
+				try {
+					await bot.telegram.setWebhook(webhookUrl, {
+						drop_pending_updates: true
+					});
+					console.log(`Webhook successfully set to: ${webhookUrl}`);
+				} catch (retryError) {
+					console.error('Error setting webhook on retry:', retryError.message);
+				}
+			}, 2000);
+		} else {
+			logError('Webhook setup', error);
+			console.log('Continuing without webhook setup...');
+		}
 	}
 });
 
