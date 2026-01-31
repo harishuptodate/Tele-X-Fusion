@@ -3,7 +3,7 @@ const fs = require('fs').promises;
 const crypto = require('crypto');
 const { Telegraf } = require('telegraf');
 const { TwitterApi } = require('twitter-api-v2');
-const http = require('http');
+const express = require('express');
 const fetch = require('node-fetch');
 const mongoose = require('mongoose');
 const TelegramMessage = require('./models/TelegramMessage');
@@ -199,47 +199,44 @@ const connectMongoDB = async () => {
 	}
 };
 
-// Health check server using Node's built-in http module
-const server = http.createServer((req, res) => {
-	// Only handle GET requests to root path
-	if (req.method === 'GET' && req.url === '/') {
-		let response = 'Bot is running!<br><br>';
+// Initialize Express app
+const app = express();
+
+// Middleware to parse JSON bodies
+app.use(express.json());
+
+// Health check route
+app.get('/', (req, res) => {
+	let response = 'Bot is running!<br><br>';
+	
+	if (rateLimitState.limit !== null) {
+		// Calculate real-time remaining: limit - successfulTweetsCount
+		const realTimeRemaining = rateLimitState.limit - (rateLimitState.successfulTweetsCount || 0);
 		
-		if (rateLimitState.limit !== null) {
-			// Calculate real-time remaining: limit - successfulTweetsCount
-			const realTimeRemaining = rateLimitState.limit - (rateLimitState.successfulTweetsCount || 0);
-			
-			response += `🔒 Total Tweet Limit: ${rateLimitState.limit}<br>`;
-			response += `✅ Successful Tweets Today: ${rateLimitState.successfulTweetsCount || 0}<br>`;
-			response += `📊 Real-Time Remaining: ${realTimeRemaining}<br>`;
-			
-			if (rateLimitState.resetAt) {
-				const resetDate = new Date(rateLimitState.resetAt);
-				response += `🕒 Limit Resets At: ${resetDate.toLocaleString()}<br>`;
-			}
-			
-			if (rateLimitState.lastErrorOccurredAt) {
-				const errorDate = new Date(rateLimitState.lastErrorOccurredAt);
-				response += `⚠️ Last Rate Limit Error: ${errorDate.toLocaleString()}<br>`;
-			}
-			
-			if (rateLimitState.lastUpdated) {
-				response += `🔄 Last Updated: ${new Date(rateLimitState.lastUpdated).toLocaleString()}`;
-			}
-		} else {
-			response += 'Rate limit information not available yet.<br>';
-			response += 'Waiting for first rate limit error or successful tweet.';
+		response += `🔒 Total Tweet Limit: ${rateLimitState.limit}<br>`;
+		response += `✅ Successful Tweets Today: ${rateLimitState.successfulTweetsCount || 0}<br>`;
+		response += `📊 Real-Time Remaining: ${realTimeRemaining}<br>`;
+		
+		if (rateLimitState.resetAt) {
+			const resetDate = new Date(rateLimitState.resetAt);
+			response += `🕒 Limit Resets At: ${resetDate.toLocaleString()}<br>`;
 		}
 		
-		res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-		res.end(response);
+		if (rateLimitState.lastErrorOccurredAt) {
+			const errorDate = new Date(rateLimitState.lastErrorOccurredAt);
+			response += `⚠️ Last Rate Limit Error: ${errorDate.toLocaleString()}<br>`;
+		}
+		
+		if (rateLimitState.lastUpdated) {
+			response += `🔄 Last Updated: ${new Date(rateLimitState.lastUpdated).toLocaleString()}`;
+		}
 	} else {
-		res.writeHead(404, { 'Content-Type': 'text/plain' });
-		res.end('Not Found');
+		response += 'Rate limit information not available yet.<br>';
+		response += 'Waiting for first rate limit error or successful tweet.';
 	}
+	
+	res.send(response);
 });
-
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
 // Initialize bot and Twitter client
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
@@ -598,25 +595,46 @@ bot.on('channel_post', async (ctx) => {
 	}
 });
 
-// Load rate limit state and connect to MongoDB on startup
-(async () => {
+// Webhook endpoint for Telegram
+app.post('/api/webhook', async (req, res) => {
+	try {
+		await bot.handleUpdate(req.body);
+		res.sendStatus(200);
+	} catch (error) {
+		logError('Webhook handler', error);
+		res.sendStatus(500);
+	}
+});
+
+// Start Express server
+app.listen(PORT, async () => {
+	console.log(`Server running on port ${PORT}`);
+	
+	// Load rate limit state and connect to MongoDB on startup
 	await loadRateLimitState();
 	connectMongoDB();
-})();
-
-bot
-	.launch()
-	.then(() => console.log('Bot is up and running.'))
-	.catch((err) => {
-		logError('Bot launch', err);
-		process.exit(1);
-	});
+	
+	// Set webhook URL
+	const webhookUrl = 'https://tele-x-fusion-main.onrender.com/api/webhook';
+	try {
+		await bot.telegram.setWebhook(webhookUrl);
+		console.log(`Webhook set to: ${webhookUrl}`);
+	} catch (error) {
+		logError('Webhook setup', error);
+		console.log('Continuing without webhook setup...');
+	}
+});
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
 	console.log('Shutting down gracefully...');
 	await saveRateLimitState();
-	bot.stop('SIGINT');
+	try {
+		await bot.telegram.deleteWebhook();
+		console.log('Webhook deleted');
+	} catch (error) {
+		console.error('Error deleting webhook:', error.message);
+	}
 	mongoose.connection.close();
 	process.exit(0);
 });
@@ -624,7 +642,12 @@ process.on('SIGINT', async () => {
 process.on('SIGTERM', async () => {
 	console.log('Shutting down gracefully...');
 	await saveRateLimitState();
-	bot.stop('SIGTERM');
+	try {
+		await bot.telegram.deleteWebhook();
+		console.log('Webhook deleted');
+	} catch (error) {
+		console.error('Error deleting webhook:', error.message);
+	}
 	mongoose.connection.close();
 	process.exit(0);
 });
