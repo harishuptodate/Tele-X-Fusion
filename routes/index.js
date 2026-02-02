@@ -5,6 +5,28 @@ const CONFIG = require('../config');
 
 const router = express.Router();
 
+// Helper function to format date in IST (DD/MM/YYYY HH:MM:SS)
+const formatISTDate = (dateString) => {
+	if (!dateString) return '';
+	const date = new Date(dateString);
+	
+	// Convert to IST using toLocaleString with Asia/Kolkata timezone
+	const istString = date.toLocaleString('en-GB', { 
+		timeZone: 'Asia/Kolkata',
+		day: '2-digit',
+		month: '2-digit',
+		year: 'numeric',
+		hour: '2-digit',
+		minute: '2-digit',
+		second: '2-digit',
+		hour12: false
+	});
+	
+	// Format: DD/MM/YYYY HH:MM:SS
+	// toLocaleString returns format like "DD/MM/YYYY, HH:MM:SS", so we need to replace comma
+	return istString.replace(', ', ' ');
+};
+
 // Health check route
 router.get('/', async (req, res) => {
 	const rateLimitState = await getRateLimitState();
@@ -42,13 +64,15 @@ router.get('/', async (req, res) => {
 			</div>`;
 		}
 		
+		// Always show Limit Resets At
+		let resetDisplay = '';
 		if (rateLimitState.resetAt) {
 			const resetDate = new Date(rateLimitState.resetAt);
 			const now = new Date();
 			const timeUntilReset = resetDate.getTime() - now.getTime();
 			const isExpired = timeUntilReset <= 0;
 			
-			let resetDisplay = resetDate.toLocaleString();
+			resetDisplay = formatISTDate(rateLimitState.resetAt);
 			if (!isExpired) {
 				const hours = Math.floor(timeUntilReset / (1000 * 60 * 60));
 				const minutes = Math.floor((timeUntilReset % (1000 * 60 * 60)) / (1000 * 60));
@@ -56,29 +80,30 @@ router.get('/', async (req, res) => {
 			} else {
 				resetDisplay += ' (EXPIRED - should reset soon)';
 			}
-			
-			rateLimitInfo += `
+		} else {
+			// Show "limit not yet reached" when resetAt is null
+			resetDisplay = 'limit not yet reached';
+		}
+		
+		rateLimitInfo += `
 			<div class="info-item">
 				<span class="label">🕒 Limit Resets At:</span>
 				<span class="value">${resetDisplay}</span>
 			</div>`;
-		}
 		
 		if (rateLimitState.lastErrorOccurredAt) {
-			const errorDate = new Date(rateLimitState.lastErrorOccurredAt);
 			rateLimitInfo += `
 			<div class="info-item">
 				<span class="label">⚠️ Last Rate Limit Error:</span>
-				<span class="value">${errorDate.toLocaleString()}</span>
+				<span class="value">${formatISTDate(rateLimitState.lastErrorOccurredAt)}</span>
 			</div>`;
 		}
 		
 		if (rateLimitState.lastUpdated) {
-			const updatedDate = new Date(rateLimitState.lastUpdated);
 			rateLimitInfo += `
 			<div class="info-item">
 				<span class="label">🔄 Last Updated:</span>
-				<span class="value">${updatedDate.toLocaleString()}</span>
+				<span class="value">${formatISTDate(rateLimitState.lastUpdated)}</span>
 			</div>`;
 		}
 	} else {

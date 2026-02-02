@@ -2,6 +2,23 @@ const CONFIG = require('../config');
 const ProcessedMessage = require('../models/ProcessedMessage');
 const RateLimitState = require('../models/RateLimitState');
 
+// Helper function to format date in IST (DD/MM/YYYY HH:MM:SS)
+const formatISTDate = (date) => {
+	if (!date) return '';
+	const dateObj = date instanceof Date ? date : new Date(date);
+	const istString = dateObj.toLocaleString('en-GB', { 
+		timeZone: 'Asia/Kolkata',
+		day: '2-digit',
+		month: '2-digit',
+		year: 'numeric',
+		hour: '2-digit',
+		minute: '2-digit',
+		second: '2-digit',
+		hour12: false
+	});
+	return istString.replace(', ', ' ');
+};
+
 const isMessagePostedToTwitter = async (messageId) => {
 	try {
 		const message = await ProcessedMessage.findOne({ messageId: messageId });
@@ -66,6 +83,8 @@ const incrementSuccessfulTweetCount = async () => {
 		if (state.remaining !== null && state.limit !== null) {
 			state.remaining = Math.max(0, state.remaining - 1);
 		}
+		// Reset the resetAt field when tweet is posted successfully
+		state.resetAt = null;
 		state.lastUpdated = new Date();
 		await state.save();
 	} catch (error) {
@@ -145,10 +164,10 @@ const handleRateLimitError = async (error) => {
 		console.log('=== RATE LIMIT ERROR PROCESSED ===');
 		console.log(`🔒 User Tweet Limit: ${state.limit ?? 'N/A'}, Remaining: ${state.remaining ?? 'N/A'}`);
 		if (state.resetAt) {
-			console.log(`🕒 User Limit Resets At: ${state.resetAt.toLocaleString()}`);
+			console.log(`🕒 User Limit Resets At: ${formatISTDate(state.resetAt)}`);
 		}
-		console.log(`⚠️ Last Error Occurred At: ${state.lastErrorOccurredAt.toLocaleString()}`);
-		console.log(`🔄 Last Updated: ${state.lastUpdated.toLocaleString()}`);
+		console.log(`⚠️ Last Error Occurred At: ${formatISTDate(state.lastErrorOccurredAt)}`);
+		console.log(`🔄 Last Updated: ${formatISTDate(state.lastUpdated)}`);
 		console.log('Skipping tweet posting due to rate limit.');
 	} catch (dbError) {
 		console.error('Error handling rate limit error:', dbError.message);
