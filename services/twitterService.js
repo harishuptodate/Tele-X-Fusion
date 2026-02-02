@@ -77,6 +77,7 @@ const postTweet = async (captionChunks, message, retrievedText, textContent) => 
 			return false;
 		}
 	} catch (error) {
+		console.log('Error posting tweet:', error);
 		if (error.code === 429 && error.headers) {
 			await handleRateLimitError(error);
 		} else {
