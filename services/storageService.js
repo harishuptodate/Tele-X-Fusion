@@ -74,29 +74,85 @@ const incrementSuccessfulTweetCount = async () => {
 };
 
 const handleRateLimitError = async (error) => {
-	if (error.code === 429 && error.headers) {
-		try {
-			const userLimit = error.headers['x-user-limit-24hour-limit'];
-			const userRemaining = error.headers['x-user-limit-24hour-remaining'];
-			const userReset = error.headers['x-user-limit-24hour-reset'];
+	// Check if this is a rate limit error
+	const isRateLimitError = error.code === 429 || 
+	                         error.status === 429 || 
+	                         error.rateLimit ||
+	                         (error.response && error.response.status === 429);
+	
+	if (!isRateLimitError) {
+		return;
+	}
 
-			const userResetDate = new Date(Number(userReset) * 1000);
-			
-			const state = await RateLimitState.getState();
-			state.limit = userLimit ? parseInt(userLimit) : state.limit;
-			state.remaining = userRemaining ? parseInt(userRemaining) : state.remaining;
-			state.resetAt = userResetDate;
-			state.lastErrorOccurredAt = new Date();
-			state.lastUpdated = new Date();
-			// Preserve successfulTweetsCount
-			await state.save();
-			
-			console.log(`🔒 User Tweet Limit: ${state.limit}, Remaining: ${state.remaining}`);
-			console.log(`🕒 User Limit Resets At: ${userResetDate.toString()}`);
-			console.log('Skipping tweet posting due to rate limit.');
-		} catch (dbError) {
-			console.error('Error handling rate limit error:', dbError.message);
+	try {
+		// Try to extract headers from different possible locations
+		let headers = error.headers;
+		if (!headers && error.response) {
+			headers = error.response.headers;
 		}
+		if (!headers && error.rateLimit) {
+			// Handle rateLimit object if present
+			headers = error.rateLimit;
+		}
+
+		// Extract rate limit information from headers
+		// Twitter API v2 uses different header names, try multiple formats
+		const userLimit = headers?.['x-user-limit-24hour-limit'] || 
+		                  headers?.['x-rate-limit-limit'] ||
+		                  headers?.['x-ratelimit-limit'] ||
+		                  error.rateLimit?.limit;
+		
+		const userRemaining = headers?.['x-user-limit-24hour-remaining'] || 
+		                      headers?.['x-rate-limit-remaining'] ||
+		                      headers?.['x-ratelimit-remaining'] ||
+		                      error.rateLimit?.remaining;
+		
+		const userReset = headers?.['x-user-limit-24hour-reset'] || 
+		                  headers?.['x-rate-limit-reset'] ||
+		                  headers?.['x-ratelimit-reset'] ||
+		                  error.rateLimit?.reset;
+
+		// Get current state
+		const state = await RateLimitState.getState();
+		
+		// Update limit if we have it
+		if (userLimit !== undefined && userLimit !== null) {
+			state.limit = parseInt(userLimit);
+		}
+		
+		// Update remaining if we have it
+		if (userRemaining !== undefined && userRemaining !== null) {
+			state.remaining = parseInt(userRemaining);
+		}
+		
+		// Update reset time if we have it
+		if (userReset !== undefined && userReset !== null) {
+			// Reset can be in seconds (Unix timestamp) or milliseconds
+			const resetValue = Number(userReset);
+			const userResetDate = resetValue < 10000000000 
+				? new Date(resetValue * 1000)  // Unix timestamp in seconds
+				: new Date(resetValue);         // Already in milliseconds
+			state.resetAt = userResetDate;
+		}
+		
+		// Always update error timestamp and last updated
+		state.lastErrorOccurredAt = new Date();
+		state.lastUpdated = new Date();
+		
+		// Preserve successfulTweetsCount
+		await state.save();
+		
+		console.log('=== RATE LIMIT ERROR PROCESSED ===');
+		console.log(`🔒 User Tweet Limit: ${state.limit ?? 'N/A'}, Remaining: ${state.remaining ?? 'N/A'}`);
+		if (state.resetAt) {
+			console.log(`🕒 User Limit Resets At: ${state.resetAt.toLocaleString()}`);
+		}
+		console.log(`⚠️ Last Error Occurred At: ${state.lastErrorOccurredAt.toLocaleString()}`);
+		console.log(`🔄 Last Updated: ${state.lastUpdated.toLocaleString()}`);
+		console.log('Skipping tweet posting due to rate limit.');
+	} catch (dbError) {
+		console.error('Error handling rate limit error:', dbError.message);
+		console.error('Full error:', dbError);
 	}
 };
 
@@ -130,9 +186,24 @@ const canMakeTwitterRequest = async () => {
 		if (state.limit === null) {
 			return true;
 		}
+		
+		// Check if reset time has passed - if so, reset the remaining count
+		if (state.resetAt && new Date() >= state.resetAt) {
+			console.log('Rate limit reset time has passed, resetting remaining count');
+			state.remaining = state.limit; // Reset to full limit
+			state.lastUpdated = new Date();
+			await state.save();
+		}
+		
 		// Use remaining from error headers
 		if (state.remaining !== null && state.remaining <= 0) {
 			console.log(`Rate limit reached. Limit: ${state.limit}, Remaining: ${state.remaining}`);
+			if (state.resetAt) {
+				const timeUntilReset = Math.max(0, state.resetAt.getTime() - Date.now());
+				const hoursUntilReset = Math.floor(timeUntilReset / (1000 * 60 * 60));
+				const minutesUntilReset = Math.floor((timeUntilReset % (1000 * 60 * 60)) / (1000 * 60));
+				console.log(`Rate limit resets in: ${hoursUntilReset}h ${minutesUntilReset}m`);
+			}
 			return false;
 		}
 		return true;

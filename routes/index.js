@@ -13,12 +13,22 @@ router.get('/', async (req, res) => {
 	const saleModeEmoji = CONFIG.IS_SALE_MODE ? '🟢' : '🔴';
 	
 	let rateLimitInfo = '';
-	if (rateLimitState.limit !== null) {
-		rateLimitInfo += `
+	const hasAnyData = rateLimitState.limit !== null || 
+	                   rateLimitState.remaining !== null || 
+	                   rateLimitState.resetAt !== null ||
+	                   rateLimitState.lastErrorOccurredAt !== null ||
+	                   rateLimitState.lastUpdated !== null;
+	
+	if (hasAnyData) {
+		if (rateLimitState.limit !== null) {
+			rateLimitInfo += `
 			<div class="info-item">
 				<span class="label">🔒 Total Tweet Limit:</span>
 				<span class="value">${rateLimitState.limit}</span>
-			</div>
+			</div>`;
+		}
+		
+		rateLimitInfo += `
 			<div class="info-item">
 				<span class="label">✅ Successful Tweets Today:</span>
 				<span class="value">${rateLimitState.successfulTweetsCount || 0}</span>
@@ -34,10 +44,23 @@ router.get('/', async (req, res) => {
 		
 		if (rateLimitState.resetAt) {
 			const resetDate = new Date(rateLimitState.resetAt);
+			const now = new Date();
+			const timeUntilReset = resetDate.getTime() - now.getTime();
+			const isExpired = timeUntilReset <= 0;
+			
+			let resetDisplay = resetDate.toLocaleString();
+			if (!isExpired) {
+				const hours = Math.floor(timeUntilReset / (1000 * 60 * 60));
+				const minutes = Math.floor((timeUntilReset % (1000 * 60 * 60)) / (1000 * 60));
+				resetDisplay += ` (in ${hours}h ${minutes}m)`;
+			} else {
+				resetDisplay += ' (EXPIRED - should reset soon)';
+			}
+			
 			rateLimitInfo += `
 			<div class="info-item">
 				<span class="label">🕒 Limit Resets At:</span>
-				<span class="value">${resetDate.toLocaleString()}</span>
+				<span class="value">${resetDisplay}</span>
 			</div>`;
 		}
 		
@@ -51,10 +74,11 @@ router.get('/', async (req, res) => {
 		}
 		
 		if (rateLimitState.lastUpdated) {
+			const updatedDate = new Date(rateLimitState.lastUpdated);
 			rateLimitInfo += `
 			<div class="info-item">
 				<span class="label">🔄 Last Updated:</span>
-				<span class="value">${new Date(rateLimitState.lastUpdated).toLocaleString()}</span>
+				<span class="value">${updatedDate.toLocaleString()}</span>
 			</div>`;
 		}
 	} else {

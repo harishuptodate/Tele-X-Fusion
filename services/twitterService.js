@@ -34,13 +34,23 @@ const postTweet = async (captionChunks, message, retrievedText, textContent) => 
 					process.env.TELEGRAM_BOT_TOKEN,
 				);
 				if (imageBuffer) {
-					const mediaId = await twitterClient.v1.uploadMedia(imageBuffer, {
-						type: 'photo',
-					});
-					tweetResponse = await twitterClient.v2.tweet({
-						text: captionChunks[0],
-						media: { media_ids: [mediaId] },
-					});
+					try {
+						const mediaId = await twitterClient.v1.uploadMedia(imageBuffer, {
+							type: 'photo',
+						});
+						tweetResponse = await twitterClient.v2.tweet({
+							text: captionChunks[0],
+							media: { media_ids: [mediaId] },
+						});
+					} catch (mediaError) {
+						// Handle rate limit error from media upload
+						if (mediaError.code === 429 || mediaError.rateLimit) {
+							console.log('Rate limit error during media upload');
+							await handleRateLimitError(mediaError);
+							return false;
+						}
+						throw mediaError;
+					}
 				} else {
 					console.log('Failed to download image, posting text only.');
 					tweetResponse = await twitterClient.v2.tweet(captionChunks[0]);
@@ -63,10 +73,20 @@ const postTweet = async (captionChunks, message, retrievedText, textContent) => 
 					console.log('Rate limit reached while posting replies, stopping');
 					break;
 				}
-				tweetResponse = await twitterClient.v2.reply(
-					captionChunks[i],
-					tweetResponse.data.id,
-				);
+				try {
+					tweetResponse = await twitterClient.v2.reply(
+						captionChunks[i],
+						tweetResponse.data.id,
+					);
+				} catch (replyError) {
+					// Handle rate limit error from reply
+					if (replyError.code === 429 || replyError.rateLimit) {
+						console.log('Rate limit error while posting reply');
+						await handleRateLimitError(replyError);
+						break;
+					}
+					throw replyError;
+				}
 			}
 			
 			await incrementSuccessfulTweetCount();
@@ -78,12 +98,25 @@ const postTweet = async (captionChunks, message, retrievedText, textContent) => 
 		}
 	} catch (error) {
 		console.log('Error posting tweet:', error);
-		if (error.code === 429 && error.headers) {
+		console.log('Error details:', {
+			code: error.code,
+			status: error.status,
+			message: error.message,
+			hasHeaders: !!error.headers,
+			hasResponse: !!error.response,
+			hasRateLimit: !!error.rateLimit,
+			headers: error.headers,
+			responseHeaders: error.response?.headers
+		});
+		
+		// Check for rate limit error (429) in various formats
+		if (error.code === 429 || error.status === 429 || error.rateLimit) {
+			console.log('Rate limit error detected, updating database...');
 			await handleRateLimitError(error);
+			return false;
 		} else {
 			throw error;
 		}
-		return false;
 	}
 };
 
