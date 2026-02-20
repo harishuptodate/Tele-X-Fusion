@@ -98,11 +98,27 @@ const incrementSuccessfulTweetCount = async () => {
 		}
 		
 		// Increment successful tweet count
-		state.successfulTweetsCount = (state.successfulTweetsCount || 0) + 1;
+		const currentCount = state.successfulTweetsCount || 0;
 		
-		// Decrement remaining if we have it
-		if (state.remaining !== null && state.limit !== null) {
-			state.remaining = Math.max(0, state.remaining - 1);
+		// Check if we've reached the limit before incrementing
+		if (state.limit !== null && currentCount >= state.limit) {
+			// Reset when reaching limit (should be under 17, so reset at 17)
+			state.successfulTweetsCount = 0;
+			state.windowStartTime = now; // Start new window
+			const twentyFourHours = 24 * 60 * 60 * 1000;
+			state.resetAt = new Date(now.getTime() + twentyFourHours);
+			console.log('Reached tweet limit, resetting successfulTweetsCount and starting new window');
+			// Set remaining to full limit after reset
+			state.remaining = state.limit;
+		} else {
+			// Increment count if not at limit
+			state.successfulTweetsCount = currentCount + 1;
+		}
+		
+		// Initialize or update remaining count
+		if (state.limit !== null) {
+			// Calculate remaining as limit - successfulTweetsCount
+			state.remaining = Math.max(0, state.limit - state.successfulTweetsCount);
 		}
 		
 		// Calculate resetAt as windowStartTime + 24 hours if not already set from error headers

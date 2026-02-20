@@ -30,7 +30,7 @@ const postTweet = async (captionChunks, message, retrievedText, textContent) => 
 				if (imageBuffer) {
 					try {
 						const mediaId = await twitterClient.v1.uploadMedia(imageBuffer, {
-							type: 'photo',
+							mimeType: 'image/jpeg',
 						});
 						tweetResponse = await twitterClient.v2.tweet({
 							text: captionChunks[0],
