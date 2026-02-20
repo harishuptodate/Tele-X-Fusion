@@ -1,6 +1,5 @@
 const { TwitterApi } = require('twitter-api-v2');
 const {
-	canMakeTwitterRequest,
 	incrementSuccessfulTweetCount,
 	handleRateLimitError,
 } = require('./storageService');
@@ -16,11 +15,6 @@ const twitterClient = new TwitterApi({
 });
 
 const postTweet = async (captionChunks, message, retrievedText, textContent) => {
-	if (!(await canMakeTwitterRequest())) {
-		console.log('Rate limit reached, skipping tweet posting');
-		return false;
-	}
-
 	try {
 		let tweetResponse;
 		const hasAmazonLink = hasAmazonLinks(retrievedText || textContent);
@@ -69,10 +63,6 @@ const postTweet = async (captionChunks, message, retrievedText, textContent) => 
 		// Post replies if initial tweet was successful
 		if (tweetResponse && tweetResponse.data) {
 			for (let i = 1; i < captionChunks.length; i++) {
-				if (!(await canMakeTwitterRequest())) {
-					console.log('Rate limit reached while posting replies, stopping');
-					break;
-				}
 				try {
 					tweetResponse = await twitterClient.v2.reply(
 						captionChunks[i],

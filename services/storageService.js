@@ -207,40 +207,12 @@ const handleRateLimitError = async (error) => {
 	}
 };
 
-const getRateLimitState = async () => {
-	try {
-		const state = await RateLimitState.getState();
-		return {
-			limit: state.limit,
-			remaining: state.remaining,
-			resetAt: state.resetAt ? state.resetAt.toISOString() : null,
-			lastUpdated: state.lastUpdated ? state.lastUpdated.toISOString() : null,
-			successfulTweetsCount: state.successfulTweetsCount || 0,
-			windowStartTime: state.windowStartTime ? state.windowStartTime.toISOString() : null,
-			lastErrorOccurredAt: state.lastErrorOccurredAt ? state.lastErrorOccurredAt.toISOString() : null
-		};
-	} catch (error) {
-		console.error('Error getting rate limit state:', error.message);
-		return {
-			limit: null,
-			remaining: null,
-			resetAt: null,
-			lastUpdated: null,
-			successfulTweetsCount: 0,
-			windowStartTime: null,
-			lastErrorOccurredAt: null
-		};
-	}
-};
-
-const canMakeTwitterRequest = async () => {
+// Check and reset rate limit state if 24 hours have passed
+// This function only maintains DB state for stats display, it does NOT block requests
+const checkAndResetRateLimit = async () => {
 	try {
 		const state = await RateLimitState.getState();
 		const now = new Date();
-		
-		if (state.limit === null) {
-			return true;
-		}
 		
 		let shouldReset = false;
 		const twentyFourHours = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
@@ -270,22 +242,37 @@ const canMakeTwitterRequest = async () => {
 			state.lastUpdated = now;
 			await state.save();
 		}
-		
-		// Use remaining from error headers
-		if (state.remaining !== null && state.remaining <= 0) {
-			console.log(`Rate limit reached. Limit: ${state.limit}, Remaining: ${state.remaining}`);
-			if (state.resetAt) {
-				const timeUntilReset = Math.max(0, state.resetAt.getTime() - Date.now());
-				const hoursUntilReset = Math.floor(timeUntilReset / (1000 * 60 * 60));
-				const minutesUntilReset = Math.floor((timeUntilReset % (1000 * 60 * 60)) / (1000 * 60));
-				console.log(`Rate limit resets in: ${hoursUntilReset}h ${minutesUntilReset}m`);
-			}
-			return false;
-		}
-		return true;
 	} catch (error) {
-		console.error('Error checking rate limit:', error.message);
-		return true; // Allow request on error
+		console.error('Error checking and resetting rate limit:', error.message);
+	}
+};
+
+const getRateLimitState = async () => {
+	try {
+		// Check and reset rate limit state if 24 hours have passed (for stats display)
+		await checkAndResetRateLimit();
+		
+		const state = await RateLimitState.getState();
+		return {
+			limit: state.limit,
+			remaining: state.remaining,
+			resetAt: state.resetAt ? state.resetAt.toISOString() : null,
+			lastUpdated: state.lastUpdated ? state.lastUpdated.toISOString() : null,
+			successfulTweetsCount: state.successfulTweetsCount || 0,
+			windowStartTime: state.windowStartTime ? state.windowStartTime.toISOString() : null,
+			lastErrorOccurredAt: state.lastErrorOccurredAt ? state.lastErrorOccurredAt.toISOString() : null
+		};
+	} catch (error) {
+		console.error('Error getting rate limit state:', error.message);
+		return {
+			limit: null,
+			remaining: null,
+			resetAt: null,
+			lastUpdated: null,
+			successfulTweetsCount: 0,
+			windowStartTime: null,
+			lastErrorOccurredAt: null
+		};
 	}
 };
 
@@ -354,7 +341,7 @@ module.exports = {
 	incrementSuccessfulTweetCount,
 	handleRateLimitError,
 	getRateLimitState,
-	canMakeTwitterRequest,
+	checkAndResetRateLimit,
 	loadSaleModeState,
 	getSaleModeState,
 	setSaleModeState,
