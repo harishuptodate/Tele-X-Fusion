@@ -17,6 +17,10 @@ const rateLimitStateSchema = new mongoose.Schema({
 		type: Number,
 		default: 0
 	},
+	windowStartTime: {
+		type: Date,
+		default: null
+	},
 	lastErrorOccurredAt: {
 		type: Date,
 		default: null
