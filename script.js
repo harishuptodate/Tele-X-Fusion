@@ -6,6 +6,7 @@ const routes = require('./routes');
 const { initTelegramBot } = require('./bot/telegramBot');
 const {
 	loadRateLimitState,
+	loadSaleModeState,
 } = require('./services/storageService');
 
 const app = express();
@@ -23,6 +24,9 @@ mongoose.connect(process.env.MONGODB_URI, CONFIG.MONGODB_CONNECTION_OPTIONS)
 		
 		// Load rate limit state
 		await loadRateLimitState();
+		
+		// Load sale mode state
+		await loadSaleModeState();
 		
 		// Start the server
 		app.listen(CONFIG.PORT, () => {

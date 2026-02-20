@@ -1,6 +1,7 @@
 const CONFIG = require('../config');
 const ProcessedMessage = require('../models/ProcessedMessage');
 const RateLimitState = require('../models/RateLimitState');
+const SaleModeState = require('../models/SaleModeState');
 
 // Helper function to format date in IST (DD/MM/YYYY HH:MM:SS)
 const formatISTDate = (date) => {
@@ -232,6 +233,63 @@ const canMakeTwitterRequest = async () => {
 	}
 };
 
+const loadSaleModeState = async () => {
+	try {
+		const state = await SaleModeState.getState();
+		// Update CONFIG.IS_SALE_MODE with value from DB
+		// If DB state is null/undefined, fall back to env var
+		if (state.isSaleMode !== undefined && state.isSaleMode !== null) {
+			CONFIG.IS_SALE_MODE = state.isSaleMode;
+		} else {
+			// Fallback to environment variable if DB doesn't have a value
+			CONFIG.IS_SALE_MODE = process.env.IS_SALE_MODE === 'true';
+			// Save the env var value to DB for future use
+			if (process.env.IS_SALE_MODE !== undefined) {
+				state.isSaleMode = CONFIG.IS_SALE_MODE;
+				state.lastUpdated = new Date();
+				await state.save();
+			}
+		}
+		console.log(`Loaded sale mode state from MongoDB: ${CONFIG.IS_SALE_MODE ? 'ON' : 'OFF'}`);
+	} catch (error) {
+		console.error('Error loading sale mode state:', error.message);
+		// Fallback to environment variable on error
+		CONFIG.IS_SALE_MODE = process.env.IS_SALE_MODE === 'true';
+	}
+};
+
+const getSaleModeState = async () => {
+	try {
+		const state = await SaleModeState.getState();
+		return {
+			isSaleMode: state.isSaleMode,
+			lastUpdated: state.lastUpdated ? state.lastUpdated.toISOString() : null
+		};
+	} catch (error) {
+		console.error('Error getting sale mode state:', error.message);
+		return {
+			isSaleMode: CONFIG.IS_SALE_MODE,
+			lastUpdated: null
+		};
+	}
+};
+
+const setSaleModeState = async (isEnabled) => {
+	try {
+		const state = await SaleModeState.getState();
+		state.isSaleMode = isEnabled;
+		state.lastUpdated = new Date();
+		await state.save();
+		// Update CONFIG in memory immediately
+		CONFIG.IS_SALE_MODE = isEnabled;
+		console.log(`Sale mode updated to: ${isEnabled ? 'ON' : 'OFF'}`);
+		return true;
+	} catch (error) {
+		console.error('Error setting sale mode state:', error.message);
+		return false;
+	}
+};
+
 module.exports = {
 	isMessagePostedToTwitter,
 	addMessageToProcessed,
@@ -241,5 +299,8 @@ module.exports = {
 	handleRateLimitError,
 	getRateLimitState,
 	canMakeTwitterRequest,
+	loadSaleModeState,
+	getSaleModeState,
+	setSaleModeState,
 };
 

@@ -15,6 +15,9 @@ module.exports = {
 		serverSelectionTimeoutMS: 5000,
 		retryWrites: true,
 	},
+	// IS_SALE_MODE is initialized from env var, but can be updated dynamically via MongoDB
+	// Use loadSaleModeState() from storageService to load from DB on startup
+	// The value will be updated in memory when toggled via frontend
 	IS_SALE_MODE: process.env.IS_SALE_MODE === 'true',
 	REGEX_PATTERNS: {
 		amazonLink: /(https?:\/\/)?(www\.)?(amazon\.[a-z]{2,}|amzn\.to)\/[^\s]*/gi,
