@@ -115,11 +115,13 @@ const handleChannelPost = async (updateOrCtx) => {
 		const captionChunks = splitText(finalCaption, CONFIG.TWEET_MAX_LENGTH);
 
 		// Post to Twitter
-		const success = await postTweet(captionChunks, message, retrievedText, textContent);
+		const tweetResult = await postTweet(captionChunks, message, retrievedText, textContent);
 		
-		if (success) {
+		if (tweetResult.success) {
 			// After successful tweet: add messageId to processed list
 			await addMessageToProcessed(messageId);
+		} else if (tweetResult.blockedByRateLimit) {
+			console.log(`Skipping current message due to outbound rate limit. Reason: ${tweetResult.reason}`);
 		}
 
 		console.log('Message processing completed.');

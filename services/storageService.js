@@ -1,7 +1,7 @@
 const CONFIG = require('../config');
 const ProcessedMessage = require('../models/ProcessedMessage');
-const RateLimitState = require('../models/RateLimitState');
 const SaleModeState = require('../models/SaleModeState');
+const { outboundRateLimitService, rateLimitRepository } = require('../rate-limit');
 
 // Helper function to format date in IST (DD/MM/YYYY HH:MM:SS)
 const formatISTDate = (date) => {
@@ -59,7 +59,7 @@ const addMessageToProcessed = async (messageId) => {
 
 const loadRateLimitState = async () => {
 	try {
-		const state = await RateLimitState.getState();
+		await rateLimitRepository.getState();
 		console.log('Loaded rate limit state from MongoDB');
 	} catch (error) {
 		console.error('Error loading rate limit state:', error.message);
@@ -68,9 +68,8 @@ const loadRateLimitState = async () => {
 
 const saveRateLimitState = async (stateData) => {
 	try {
-		const state = await RateLimitState.getState();
-		Object.assign(state, stateData, { lastUpdated: new Date() });
-		await state.save();
+		const state = await rateLimitRepository.getState();
+		await rateLimitRepository.saveState(state, stateData);
 	} catch (error) {
 		console.error('Error saving rate limit state:', error.message);
 	}
@@ -78,137 +77,17 @@ const saveRateLimitState = async (stateData) => {
 
 const incrementSuccessfulTweetCount = async () => {
 	try {
-		const state = await RateLimitState.getState();
-		const now = new Date();
-		
-		// Check if 24 hours have passed since windowStartTime - if so, reset the count
-		if (state.windowStartTime) {
-			const timeSinceWindowStart = now.getTime() - state.windowStartTime.getTime();
-			const twentyFourHours = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
-			
-			if (timeSinceWindowStart >= twentyFourHours) {
-				// Reset successfulTweetsCount and start a new window
-				state.successfulTweetsCount = 0;
-				state.windowStartTime = now;
-				console.log('24-hour window has passed, resetting successfulTweetsCount and starting new window');
-			}
-		} else {
-			// First tweet - set windowStartTime
-			state.windowStartTime = now;
-		}
-		
-		// Increment successful tweet count
-		const currentCount = state.successfulTweetsCount || 0;
-		
-		// Check if we've reached the limit before incrementing
-		if (state.limit !== null && currentCount >= state.limit) {
-			// Reset when reaching limit (should be under 17, so reset at 17)
-			state.successfulTweetsCount = 0;
-			state.windowStartTime = now; // Start new window
-			const twentyFourHours = 24 * 60 * 60 * 1000;
-			state.resetAt = new Date(now.getTime() + twentyFourHours);
-			console.log('Reached tweet limit, resetting successfulTweetsCount and starting new window');
-			// Set remaining to full limit after reset
-			state.remaining = state.limit;
-		} else {
-			// Increment count if not at limit
-			state.successfulTweetsCount = currentCount + 1;
-		}
-		
-		// Initialize or update remaining count
-		if (state.limit !== null) {
-			// Calculate remaining as limit - successfulTweetsCount
-			state.remaining = Math.max(0, state.limit - state.successfulTweetsCount);
-		}
-		
-		// Calculate resetAt as windowStartTime + 24 hours if not already set from error headers
-		if (!state.resetAt && state.windowStartTime) {
-			const twentyFourHours = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
-			state.resetAt = new Date(state.windowStartTime.getTime() + twentyFourHours);
-		}
-		
-		// Never set resetAt to null - always maintain a reset time
-		state.lastUpdated = now;
-		await state.save();
+		await outboundRateLimitService.recordSuccess();
 	} catch (error) {
 		console.error('Error incrementing successful tweet count:', error.message);
 	}
 };
 
 const handleRateLimitError = async (error) => {
-	// Check if this is a rate limit error
-	const isRateLimitError = error.code === 429 || 
-	                         error.status === 429 || 
-	                         error.rateLimit ||
-	                         (error.response && error.response.status === 429);
-	
-	if (!isRateLimitError) {
-		return;
-	}
-
 	try {
-		// Try to extract headers from different possible locations
-		let headers = error.headers;
-		if (!headers && error.response) {
-			headers = error.response.headers;
-		}
-		if (!headers && error.rateLimit) {
-			// Handle rateLimit object if present
-			headers = error.rateLimit;
-		}
-
-		// Extract rate limit information from headers
-		// Twitter API v2 uses different header names, try multiple formats
-		const userLimit = headers?.['x-user-limit-24hour-limit'] || 
-		                  headers?.['x-rate-limit-limit'] ||
-		                  headers?.['x-ratelimit-limit'] ||
-		                  error.rateLimit?.limit;
-		
-		const userRemaining = headers?.['x-user-limit-24hour-remaining'] || 
-		                      headers?.['x-rate-limit-remaining'] ||
-		                      headers?.['x-ratelimit-remaining'] ||
-		                      error.rateLimit?.remaining;
-		
-		const userReset = headers?.['x-user-limit-24hour-reset'] || 
-		                  headers?.['x-rate-limit-reset'] ||
-		                  headers?.['x-ratelimit-reset'] ||
-		                  error.rateLimit?.reset;
-
-		// Get current state
-		const state = await RateLimitState.getState();
-		
-		// Update limit if we have it
-		if (userLimit !== undefined && userLimit !== null) {
-			state.limit = parseInt(userLimit);
-		}
-		
-		// Update remaining if we have it
-		if (userRemaining !== undefined && userRemaining !== null) {
-			state.remaining = parseInt(userRemaining);
-		}
-		
-		// Update reset time if we have it (only update if error provides reset time)
-		if (userReset !== undefined && userReset !== null) {
-			// Reset can be in seconds (Unix timestamp) or milliseconds
-			const resetValue = Number(userReset);
-			const userResetDate = resetValue < 10000000000 
-				? new Date(resetValue * 1000)  // Unix timestamp in seconds
-				: new Date(resetValue);         // Already in milliseconds
-			state.resetAt = userResetDate;
-		}
-		// If error doesn't provide resetAt, preserve existing resetAt or calculate from windowStartTime
-		else if (!state.resetAt && state.windowStartTime) {
-			const twentyFourHours = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
-			state.resetAt = new Date(state.windowStartTime.getTime() + twentyFourHours);
-		}
-		
-		// Always update error timestamp and last updated
-		state.lastErrorOccurredAt = new Date();
-		state.lastUpdated = new Date();
-		
-		// Preserve successfulTweetsCount and windowStartTime (don't overwrite them)
-		await state.save();
-		
+		const updated = await outboundRateLimitService.recordRateLimitError(error);
+		if (!updated) return;
+		const state = await rateLimitRepository.getState();
 		console.log('=== RATE LIMIT ERROR PROCESSED ===');
 		console.log(`🔒 User Tweet Limit: ${state.limit ?? 'N/A'}, Remaining: ${state.remaining ?? 'N/A'}`);
 		if (state.resetAt) {
@@ -227,37 +106,8 @@ const handleRateLimitError = async (error) => {
 // This function only maintains DB state for stats display, it does NOT block requests
 const checkAndResetRateLimit = async () => {
 	try {
-		const state = await RateLimitState.getState();
-		const now = new Date();
-		
-		let shouldReset = false;
-		const twentyFourHours = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
-		
-		// Check if 24 hours have passed since windowStartTime (time-based reset)
-		if (state.windowStartTime) {
-			const timeSinceWindowStart = now.getTime() - state.windowStartTime.getTime();
-			if (timeSinceWindowStart >= twentyFourHours) {
-				shouldReset = true;
-				console.log('24-hour window has passed, resetting successfulTweetsCount and starting new window');
-			}
-		}
-		
-		// Check if resetAt time has passed (error-based reset)
-		if (state.resetAt && now >= state.resetAt) {
-			shouldReset = true;
-			console.log('Rate limit reset time has passed, resetting remaining count');
-		}
-		
-		// Perform reset if either condition is met
-		if (shouldReset) {
-			state.successfulTweetsCount = 0;
-			state.remaining = state.limit; // Reset to full limit
-			state.windowStartTime = now; // Start new window
-			// Calculate new resetAt based on new windowStartTime
-			state.resetAt = new Date(now.getTime() + twentyFourHours);
-			state.lastUpdated = now;
-			await state.save();
-		}
+		const state = await rateLimitRepository.getState();
+		await outboundRateLimitService.ensureWindowReset(state);
 	} catch (error) {
 		console.error('Error checking and resetting rate limit:', error.message);
 	}
@@ -265,19 +115,7 @@ const checkAndResetRateLimit = async () => {
 
 const getRateLimitState = async () => {
 	try {
-		// Check and reset rate limit state if 24 hours have passed (for stats display)
-		await checkAndResetRateLimit();
-		
-		const state = await RateLimitState.getState();
-		return {
-			limit: state.limit,
-			remaining: state.remaining,
-			resetAt: state.resetAt ? state.resetAt.toISOString() : null,
-			lastUpdated: state.lastUpdated ? state.lastUpdated.toISOString() : null,
-			successfulTweetsCount: state.successfulTweetsCount || 0,
-			windowStartTime: state.windowStartTime ? state.windowStartTime.toISOString() : null,
-			lastErrorOccurredAt: state.lastErrorOccurredAt ? state.lastErrorOccurredAt.toISOString() : null
-		};
+		return await outboundRateLimitService.getRateLimitState();
 	} catch (error) {
 		console.error('Error getting rate limit state:', error.message);
 		return {
