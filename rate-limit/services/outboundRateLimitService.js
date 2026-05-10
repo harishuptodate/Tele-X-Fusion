@@ -7,6 +7,21 @@ const {
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 
+const normalizeErrorForRateLimit = (error) => {
+	if (!error) return error;
+
+	const headers = error.headers || error.response?.headers || error.rateLimit || {};
+	const status = error.status || error.code || error.response?.status;
+	const code = error.code || error.status || error.response?.status;
+
+	return {
+		...error,
+		headers,
+		status,
+		code,
+	};
+};
+
 const ensureWindowReset = async (state) => {
 	const now = new Date();
 	let shouldReset = false;
@@ -97,9 +112,17 @@ const recordSuccess = async () => {
 };
 
 const recordRateLimitError = async (error) => {
-	if (!isRateLimitError(error)) return false;
+	const normalizedError = normalizeErrorForRateLimit(error);
+	const isRateLimit = isRateLimitError(normalizedError);
+	// #region agent log
+	fetch('http://127.0.0.1:7628/ingest/1fd3aeed-313d-4e3a-95df-30f08beb7214',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'121def'},body:JSON.stringify({sessionId:'121def',runId:'initial',hypothesisId:'H4',location:'rate-limit/services/outboundRateLimitService.js:101',message:'recordRateLimitError gate result',data:{isRateLimit,code:normalizedError?.code??null,status:normalizedError?.status??null,hasRateLimit:!!normalizedError?.rateLimit,responseStatus:normalizedError?.response?.status??null,title:normalizedError?.data?.title??null},timestamp:Date.now()})}).catch(()=>{});
+	// #endregion
+	if (!isRateLimit) return false;
 
-	const parsed = parseTwitterRateLimit(error);
+	const parsed = parseTwitterRateLimit(normalizedError);
+	// #region agent log
+	fetch('http://127.0.0.1:7628/ingest/1fd3aeed-313d-4e3a-95df-30f08beb7214',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'121def'},body:JSON.stringify({sessionId:'121def',runId:'initial',hypothesisId:'H5',location:'rate-limit/services/outboundRateLimitService.js:106',message:'Parsed rate-limit values',data:{limit:parsed?.limit??null,remaining:parsed?.remaining??null,resetAt:parsed?.resetAt?parsed.resetAt.toISOString():null},timestamp:Date.now()})}).catch(()=>{});
+	// #endregion
 	const state = await repository.getState();
 	if (parsed.limit !== null) state.limit = parsed.limit;
 	if (parsed.remaining !== null) state.remaining = parsed.remaining;
